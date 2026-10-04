@@ -31,7 +31,7 @@ ALPHA = 0.3  # EWMA smoothing: a week's weight is (1 - ALPHA) ** (weeks ago). Hi
 K = 20  # pseudo-count for shrinkage: "20 imaginary observations at the fleet rate"
 PRIOR_SHOW = 0.85  # show-up rate assumed before any data exists
 PRIOR_FILL = 0.85  # fill rate assumed before any data exists
-INFLATION = 5.0  # multiplies the variance; tuned by the backtest (docs/forecast_backtest.md) so the 90% range covers ~90%
+INFLATION = 6.0  # multiplies the variance; tuned by the backtest (docs/forecast_backtest.md) so the 90% range covers ~90%
 Z90 = 1.645  # normal quantile for a 90% two-sided range
 
 

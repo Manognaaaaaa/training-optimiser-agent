@@ -11,8 +11,8 @@ Each scenario is documented here so it can be explained in the report:
    is the main trainer for First Aid (FA) and Hazmat (HAZ), so those courses lose capacity.
 3. SEASONAL DIPS         Attendance is lower during Ramadan and the summer peak (constants below,
    used by the attendance model in engine.py).
-4. HEALTHY CONTROL       Road Safety Refresher (RSR) has extra planned capacity (about 125-130%), afternoon
-   sessions and high demand, so it should finish on or above target.
+4. HEALTHY CONTROL       Road Safety Refresher (RSR) has a lower target (74-78% of drivers), 145% planned seats, afternoon
+   sessions and high demand, so it should finish clearly (14-29%) above target.
 """
 from dataclasses import dataclass, field
 from datetime import date

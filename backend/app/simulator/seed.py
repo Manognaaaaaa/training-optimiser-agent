@@ -45,7 +45,11 @@ class CourseProfile:
 
 COURSES = [
     CourseProfile("DEF", "Defensive Driving", 8, 12, True, (0.88, 0.92), 1.15),
-    CourseProfile("RSR", "Road Safety Refresher", 4, 15, True, (0.85, 0.87), 1.24),
+    # RSR is the healthy control: a lower target (74-78% of drivers) and 145% planned seats, so it finishes 14-29%
+    # above target. The old 85-87% target with 124% seats finished 0-14% above (once exactly on target), which is not
+    # healthy; more seats instead of a lower target runs out of unfinished drivers and breaks the forecast's pool cap
+    # (see docs/forecast_backtest.md).
+    CourseProfile("RSR", "Road Safety Refresher", 4, 15, True, (0.74, 0.78), 1.45),
     CourseProfile("FA", "First Aid", 6, 10, True, (0.88, 0.92), 1.20, scenarios.LEAVE_TRAINER_ID),
     CourseProfile("HEAT", "Heat Stress Awareness", 2, 15, True, (0.85, 0.92), 1.15),
     CourseProfile("FUEL", "Fuel-Efficient Driving", 3, 12, False, (0.25, 0.35), 1.10),

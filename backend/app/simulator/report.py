@@ -246,8 +246,8 @@ def scenario_checks(db: Session, data: dict, seed: int, determinism: tuple[str, 
     # 4. Healthy control
     ctl = code_to_id[scenarios.CONTROL_COURSE]
     checks.append((
-        "Healthy control: Road Safety Refresher finishes on or above target",
-        attended[ctl] >= targets[ctl], f"attended {attended[ctl]} of target {targets[ctl]} ({_pct(attended[ctl], targets[ctl])})"))
+        "Healthy control: Road Safety Refresher finishes at least 5% above target",
+        attended[ctl] >= 1.05 * targets[ctl], f"attended {attended[ctl]} of target {targets[ctl]} ({_pct(attended[ctl], targets[ctl])})"))
 
     # Overall: the data really contains shortfalls
     short = [courses[c].code for c in courses if c != ctl and attended[c] < 0.95 * targets[c]]
@@ -289,7 +289,7 @@ def assumptions_section() -> str:
 
 **Data**
 - 300 drivers (about 50% day, 35% night, 15% rotating), 5% hired during 2026; 10 trainers; 8 courses (4 mandatory).
-- Mandatory targets are 85-92% of active drivers; optional targets 8-35%. Planned seats are 110-130% of target.
+- Mandatory targets are 85-92% of active drivers; optional targets 8-35%. Planned seats are 110-130% of target. The RSR control is the exception: target 74-78% of active drivers and 145% planned seats, so that it clearly finishes above target.
 - Annual leave of 2-4 weeks per driver (65% starting mid-June to mid-August), some second blocks, and 20 short known absences.
 """
 

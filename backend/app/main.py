@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app import models  # noqa: F401  (registers all tables on Base.metadata)
 from app.config import settings
 from app.database import Base, engine
-from app.routers import alerts, calendar, courses, drivers, health, sessions, sim, tracking, trainers
+from app.routers import alerts, calendar, constraints, courses, drivers, health, sessions, sim, tracking, trainers
 from app.services.errors import ApiError
 
 
@@ -53,5 +53,6 @@ app.include_router(health.router, prefix="/api")
 app.include_router(sim.router, prefix="/api")
 for _router in (
     drivers.router, trainers.router, courses.router, sessions.router, calendar.router, tracking.router, alerts.router,
+    constraints.router,
 ):
     app.include_router(_router, prefix="/api")

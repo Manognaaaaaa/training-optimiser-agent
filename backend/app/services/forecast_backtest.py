@@ -313,7 +313,7 @@ def build_report(runs: list[Run], seeds: list[int], inflation: float, cov_by_inf
         f"Lead time is capped at about {max_lead:.0f} weeks because no flag is allowed before {MIN_WEEKS_FOR_FLAG} weeks of data. "
         "Every course that missed was flagged as soon as flags were allowed and stayed flagged, because the planned capacity "
         "(sessions x seats x typical fill x show-up) is already below target at the start of the year. So lead time here says "
-        "'the plan was short from day one', not 'the model spotted a problem early'. Courses that were close to target (RSR, EV, HAZ) "
+        "'the plan was short from day one', not 'the model spotted a problem early'. Courses that were close to target (EV, HAZ) "
         "are where lead time would be informative; they are in the table above only when they really missed.",
         "",
         "## Scenario checks",
@@ -330,11 +330,17 @@ def build_report(runs: list[Run], seeds: list[int], inflation: float, cov_by_inf
         "- DEF and FA behave as designed. HAZ only shows `recent_cancellations` when a session cancelled by the trainer leave starts within the "
         "last 6 weeks; in the seeds marked 'no' that did not happen (not investigated further: HAZ has only 4 to 6 sessions a year, "
         "so a single session decides it).",
-        "- **RSR is NOT reliably 'never high'.** RSR is the course closest to its target (it finishes 0% to 14% above it, depending on the seed), "
-        "so a projection error of a few percent flips it between low, medium and high. In the seeds where it was flagged high, the flag came "
-        "from the pipeline projection sitting a few completions under target; the likely cause is that the 8-point summer attendance dip "
-        "(1 Jul to 31 Aug) pulls the recent show-up rate down and the model carries that dip to the end of the year although it stops in September. "
-        "This is a limitation of the model, not something to hide: do not read a medium/high RSR flag as certainty.",
+        "- **RSR as the healthy control (history).** With a target of 85-87% of drivers and 124% planned seats, RSR finished only 0% to 14% above "
+        "target (in one seed exactly on target) and was flagged high for up to 12 weeks in 4 of 5 unseen seeds. That was not a forecasting fault: "
+        "the expected cushion was about 4% (seats x fill x show-up = 1.24 x 0.95 x 0.86), so a forecast error of a few completions flips the flag, "
+        "and in the seed that finished on target a medium/high flag is the correct answer. Two model changes were tried and did NOT help: shrinking "
+        "the rates by the observations the recent-weighted rate really rests on (more shrinkage made RSR worse, because it pulls RSR towards a fleet "
+        "show-up rate that DEF's night-shift problem drags down) and slower smoothing (a different mix of seeds, not a fix). Raising RSR's seats to "
+        "155% of target also made it healthy but was rejected: RSR then ran out of unfinished drivers, the forecast (which does not model that, see "
+        "the limitation on fill rate below) sat on its ceiling and over-projected RSR by about 24 completions, and pooled coverage fell to 84.8%. "
+        "The control was mis-specified, so RSR now has a lower target (74-78% of drivers) with 145% planned seats. It finishes 14% to 29% above "
+        "target in all 10 seeds tried and is never flagged high. A course that finishes within a few percent of its target will still flip between "
+        "levels; EV and HAZ are the close ones now.",
     ]
     lines += [
         "",
@@ -352,8 +358,7 @@ def build_report(runs: list[Run], seeds: list[int], inflation: float, cov_by_inf
         "is shrinking late in the year, so late-year fill can be overestimated for courses that have trained almost everyone "
         "(the pool cap only limits the total).",
         "- **Smoothing speed (ALPHA).** A one-off experiment on the same 5 seeds with the INFLATION grid re-tuned: ALPHA 0.3 gave June MAE 6.2, "
-        "0.15 gave 5.8 and 0.08 gave 5.7, so slower smoothing is marginally more accurate here. RSR high-flag weeks per seed (42, 1, 2, 3, 4) were "
-        "[8, 0, 5, 2, 0] at 0.3, [2, 1, 9, 0, 0] at 0.15 and [0, 2, 9, 0, 0] at 0.08: a different mix, not a fix. ALPHA stays at the specified 0.3; "
+        "0.15 gave 5.8 and 0.08 gave 5.7, so slower smoothing is marginally more accurate here. ALPHA stays at the specified 0.3; "
         "a slower value is worth trying on real data where events (a trainer on leave) must show up quickly.",
         "- **Sessions added or cancelled later** are not predicted. A new trainer leave after the snapshot will make that "
         "snapshot too optimistic; the next weekly snapshot picks it up.",
@@ -361,7 +366,7 @@ def build_report(runs: list[Run], seeds: list[int], inflation: float, cov_by_inf
         f"{len(runs)} seeds × 8 courses = {len(runs) * 8} points and the courses within one seed are not independent "
         "(same drivers, same weeks). Treat differences of a few percentage points as noise.",
         "- **Targets are tough in these simulations.** Most courses miss their target in most seeds (see the base rate above), so "
-        "'flagged' is the right answer most of the time; the interesting courses are the ones that are close (RSR, EV, HAZ).",
+        "'flagged' is the right answer most of the time; the interesting courses are the ones that are close (EV, HAZ).",
         "",
     ]
     return "\n".join(lines)
