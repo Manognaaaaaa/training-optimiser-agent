@@ -31,7 +31,7 @@ from app.simulator.rules import (
 )
 
 MAX_TOOL_ROWS = 25
-DEFAULT_LIMIT = 15
+DEFAULT_LIMIT = 6  # small defaults keep prompts short; the model can ask for more with `limit`
 SLOT_START_HOURS = SESSION_START_HOURS  # the grid used for new-session slots: 09:00, 14:00, 18:00
 SLOT_WEEKDAYS = SESSION_WEEKDAYS  # Sunday to Thursday
 MAX_SLOT_RANGE_DAYS = 28
@@ -50,6 +50,7 @@ class AlertArgs(_Args):
 
 class UpcomingArgs(_Args):
     course_id: int
+    limit: int = Field(default=DEFAULT_LIMIT, ge=1)
     from_date: date | None = None
     to_date: date | None = None
     min_free_seats: int = Field(default=0, ge=0)
@@ -150,7 +151,8 @@ def list_upcoming_sessions(db: Session, now: datetime, args: UpcomingArgs) -> di
             "fill_rate": round(fill_rate("scheduled", row.capacity, booked.get(row.id, 0), 0) or 0, 2),
             "inside_booking_window": row.start_time <= window_end,
         })
-    return {"sessions": out[:MAX_TOOL_ROWS], "total_matching": len(out), "truncated": len(out) > MAX_TOOL_ROWS}
+    shown = out[:_clip(args.limit)]
+    return {"sessions": shown, "total_matching": len(out), "truncated": len(out) > len(shown)}
 
 
 def get_session_roster(db: Session, now: datetime, args: RosterArgs) -> dict:
@@ -293,6 +295,12 @@ def run_read_only_tool(db: Session, now: datetime, name: str, args: Any) -> dict
 
 
 def _spec(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    # Some models send ids as strings ("12"). Groq rejects the whole request if the schema says "integer",
+    # so the schema also allows a string; our argument models then convert it back to a number.
+    properties = {
+        key: {**value, "type": ["integer", "string"]} if value.get("type") == "integer" else value
+        for key, value in properties.items()
+    }
     return {"type": "function", "function": {
         "name": name, "description": description,
         "parameters": {"type": "object", "properties": properties, "required": required},
@@ -306,7 +314,8 @@ TOOL_SPECS: list[dict] = [
     _spec(
         "list_upcoming_sessions", "Scheduled future sessions of a course with free seats.",
         {"course_id": {"type": "integer"}, "from_date": {"type": "string", "description": "YYYY-MM-DD"},
-         "to_date": {"type": "string", "description": "YYYY-MM-DD"}, "min_free_seats": {"type": "integer"}},
+         "to_date": {"type": "string", "description": "YYYY-MM-DD"}, "min_free_seats": {"type": "integer"},
+         "limit": {"type": "integer"}},
         ["course_id"],
     ),
     _spec("get_session_roster", "Drivers booked into a session (id, name, shift, depot).", {"session_id": {"type": "integer"}}, ["session_id"]),

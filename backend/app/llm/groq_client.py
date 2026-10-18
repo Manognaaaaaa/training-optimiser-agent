@@ -1,4 +1,5 @@
 """Groq client (OpenAI-compatible chat completions with tool calling), written with httpx."""
+import json
 import time
 from typing import Any
 
@@ -7,8 +8,9 @@ import httpx
 from app.config import settings
 from app.llm.base import LLMError, LLMResponse, ToolCall, Usage
 
-MAX_ATTEMPTS = 3  # first try plus two retries on 429 / 5xx
-MAX_RETRY_WAIT_SECONDS = 20.0
+MAX_ATTEMPTS = 6  # first try plus five retries on 429 / 5xx (free-tier limits reset about once a minute)
+MAX_RETRY_WAIT_SECONDS = 65.0
+RATE_LIMIT_BASE_WAIT_SECONDS = 15.0  # used on a 429 that has no retry-after header
 
 
 class GroqClient:
@@ -34,6 +36,7 @@ class GroqClient:
             body["tool_choice"] = "auto"
         if response_format:
             body["response_format"] = response_format
+        self._last_chars = len(json.dumps(body))  # shown in 413 errors, to see how big the request was
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
         started = time.monotonic()
@@ -46,6 +49,8 @@ class GroqClient:
                 raise LLMError("server", f"Could not reach the LLM service: {err.__class__.__name__}.") from err
 
             retryable = resp.status_code == 429 or resp.status_code >= 500
+            if resp.status_code == 429 and self._retry_after(resp) > MAX_RETRY_WAIT_SECONDS:
+                retryable = False  # a long wait means a daily limit, not a per-minute one: waiting here would not help
             if retryable and attempt < MAX_ATTEMPTS:
                 self._sleep(self._wait_seconds(resp, attempt))
                 continue
@@ -55,15 +60,24 @@ class GroqClient:
         raise LLMError("server", "The LLM service kept failing.")  # not reachable; keeps type checkers happy
 
     @staticmethod
+    def _retry_after(resp: httpx.Response) -> float:
+        try:
+            return float(resp.headers.get("retry-after", 0))
+        except ValueError:
+            return 0.0
+
+    @staticmethod
     def _wait_seconds(resp: httpx.Response, attempt: int) -> float:
-        """Honour retry-after when present, otherwise back off 1s, 2s, ..."""
+        """Honour retry-after when present, otherwise back off (longer for rate limits)."""
         header = resp.headers.get("retry-after")
         if header:
             try:
                 return min(float(header), MAX_RETRY_WAIT_SECONDS)
             except ValueError:
                 pass
-        return float(2 ** (attempt - 1))
+        if resp.status_code == 429:
+            return min(RATE_LIMIT_BASE_WAIT_SECONDS * attempt, MAX_RETRY_WAIT_SECONDS)  # 15s, 30s, 45s, ...
+        return float(2 ** attempt)  # 5xx: 2s, 4s, 8s, ...
 
     def _error_for(self, resp: httpx.Response) -> LLMError:
         detail = ""
@@ -75,9 +89,15 @@ class GroqClient:
         if code in (401, 403):
             return LLMError("auth", "The LLM rejected the API key (check GROQ_API_KEY in backend/.env).")
         if code == 429:
-            return LLMError("rate_limit", "The LLM rate limit was hit and retries did not help.")
+            wait = self._retry_after(resp)
+            when = f" Groq says to retry in {wait / 60:.0f} min." if wait else ""
+            return LLMError("rate_limit", f"The LLM rate limit was hit.{when} {detail[:250]}".strip())
         if code >= 500:
             return LLMError("server", f"The LLM service failed with HTTP {code}.")
+        if code == 402:
+            return LLMError("auth", "The LLM provider says payment is required: free credits are used up or billing is not set up. " + detail[:200])
+        if code == 413:
+            return LLMError("bad_request", f"The request was too large for the model's per-minute token limit (sent {self._last_chars} characters). {detail[:200]}")
         hint = f" Check that GROQ_MODEL ({self.model}) supports tool calling on Groq." if code in (400, 404) else ""
         return LLMError("bad_request", f"The LLM rejected the request (HTTP {code}): {detail[:300]}.{hint}")
 

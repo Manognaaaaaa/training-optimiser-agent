@@ -17,7 +17,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60
     planner_default_n: int = 5
     planner_max_n: int = 10
-    planner_max_steps: int = 12
+    planner_max_steps: int = 8
+    planner_context_char_budget: int = 10000  # keep each request under this many characters (about 5,500 tokens)
+    planner_sample_pause_seconds: float = 3  # pause between samples so Groq's per-minute limits can recover
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

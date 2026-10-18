@@ -115,15 +115,15 @@ def test_submit_no_plan(adb):
     assert row.outcome == "no_plan" and row.rationale == "pool is empty" and run.n_no_plan == 1 and not row.is_valid
 
 
-def test_third_validate_call_is_refused(adb):
+def test_second_validate_call_is_refused(adb):
     plan = good_plan(adb)
     validate = tool_response("validate_plan", {"plan": plan})
-    llm = FakeLLMClient([validate, validate, validate, submit(plan)])
+    llm = FakeLLMClient([validate, validate, submit(plan)])
     run = run_planner(adb, ALERT_ID, 1, llm)
     (row,) = plans_of(adb, run)
-    assert row.n_validate_calls == 2 and len(row.draft_violations) == 2 and row.outcome == "valid"
-    refusal = llm.requests[3]["messages"][-1]["content"]
-    assert "at most 2 times" in refusal and "submit_plan" in refusal
+    assert row.n_validate_calls == 1 and len(row.draft_violations) == 1 and row.outcome == "valid"
+    refusal = llm.requests[2]["messages"][-1]["content"]
+    assert "at most 1 times" in refusal and "submit_plan" in refusal
 
 
 def test_validate_reports_real_violations_to_the_agent(adb):
@@ -197,10 +197,14 @@ def test_attendance_gap_strategies(adb):
         assert prompts.STRATEGIES["attendance_gap"][i] in request["messages"][1]["content"]
 
 
-def test_system_prompt_is_generated_and_short():
+def test_system_prompt_is_short_and_prefetched_facts_reach_the_model(adb):
     text = prompts.system_prompt()
-    assert '"enroll_driver"' in text and "$defs" in text and "Only use IDs returned by tools" in text
-    assert len(text) / 4 < 1800  # rough token estimate
+    assert '"enroll_driver"' in text and "Only use IDs" in text
+    assert len(text) < 3000  # roughly 800 tokens
+    llm = FakeLLMClient([tool_response("submit_no_plan", {"reason": "x"})])
+    run_planner(adb, ALERT_ID, 1, llm)
+    user = llm.requests[0]["messages"][1]["content"]
+    assert '"shortfall_type":"capacity_gap"' in user and '"sessions_with_free_seats"' in user
 
 
 def test_planner_never_changes_sessions_or_enrollments(adb):
@@ -248,3 +252,50 @@ def test_run_row_counts_add_up(adb):
     total = run.n_valid + run.n_invalid + run.n_schema_invalid + run.n_no_plan + run.n_step_limit + run.n_duplicates + run.n_llm_errors
     assert total == run.n_requested == 3
     assert adb.scalar(select(func.count()).select_from(PlannerRun)) == 1
+
+
+def test_planner_pauses_between_samples_but_not_before_the_first(adb, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("app.llm.planner.settings.planner_sample_pause_seconds", 2.5)
+    monkeypatch.setattr("app.llm.planner.time.sleep", sleeps.append)
+    llm = FakeLLMClient([tool_response("submit_no_plan", {"reason": "x"}) for _ in range(3)])
+    run_planner(adb, ALERT_ID, 3, llm)
+    assert sleeps == [2.5, 2.5]
+
+
+def test_old_tool_results_are_pruned_to_stay_under_budget(adb, monkeypatch):
+    from app.llm.planner import OMITTED_NOTE, TOOLS_CHARS, prune_messages
+
+    big = "x" * 3000
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+    for i in range(4):
+        messages += [{"role": "assistant", "content": None, "tool_calls": [{"id": str(i)}]}, {"role": "tool", "tool_call_id": str(i), "content": big}]
+    budget = TOOLS_CHARS + 7000
+    assert prune_messages(messages, budget) == 2  # oldest two dropped, newest two kept
+    tool_texts = [m["content"] for m in messages if m["role"] == "tool"]
+    assert tool_texts[:2] == [OMITTED_NOTE, OMITTED_NOTE] and tool_texts[2:] == [big, big]
+    assert prune_messages(messages, budget) == 0  # already under budget
+
+
+def test_loop_prunes_and_still_finishes(adb, monkeypatch):
+    monkeypatch.setattr("app.llm.planner.settings.planner_context_char_budget", 1)  # force pruning every step
+    plan = good_plan(adb)
+    llm = FakeLLMClient([tool_response("get_alert_context", {"alert_id": ALERT_ID}), tool_response("list_upcoming_sessions", {"course_id": 1}), submit(plan)])
+    run = run_planner(adb, ALERT_ID, 1, llm)
+    (row,) = plans_of(adb, run)
+    assert row.outcome == "valid" and any("dropped from the prompt" in t.get("note", "") for t in row.trace)
+    assert "omitted" in llm.requests[2]["messages"][3]["content"]
+
+
+def test_provider_rejecting_a_tool_call_is_retried_not_fatal(adb):
+    plan = good_plan(adb)
+    err = LLMError("bad_request", "Tool call validation failed: /session_id: expected integer, but got string")
+    run = run_planner(adb, ALERT_ID, 1, FakeLLMClient([err, submit(plan)]))
+    (row,) = plans_of(adb, run)
+    assert run.status == "done" and row.outcome == "valid" and row.n_steps == 2
+    assert any("rejected the tool call" in t.get("note", "") for t in row.trace)
+
+
+def test_other_bad_requests_still_fail_the_run(adb):
+    run = run_planner(adb, ALERT_ID, 1, FakeLLMClient([LLMError("bad_request", "model does not exist")]))
+    assert run.status == "failed" and run.error.startswith("bad_request")

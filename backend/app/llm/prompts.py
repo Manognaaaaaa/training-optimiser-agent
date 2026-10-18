@@ -1,7 +1,5 @@
 """Prompt text for the planning agent. Plain strings, versioned, so every stored plan says which prompt made it."""
-import json
-
-from app.schemas.plan import Plan
+import json  # noqa: F401
 
 PROMPT_VERSION = "p5-v1"
 
@@ -40,43 +38,23 @@ def pick_temperature(sample_index: int) -> float:
     return TEMPERATURES[sample_index % len(TEMPERATURES)]
 
 
-def _plan_schema_text() -> str:
-    """The exact plan format, generated from the real pydantic model so it can never drift."""
-    return json.dumps(Plan.model_json_schema(), separators=(",", ":"))
-
-
 def system_prompt() -> str:
-    return f"""You are a planning agent for a driver training department. A course is at risk of missing its annual completion target. Propose ONE redistribution plan that closes the gap, using only real data from the tools.
+    """Kept deliberately short: Groq's free tier allows few tokens per minute and every step re-sends this text."""
+    return """You plan driver-training changes for a course that is at risk of missing its annual target. Return ONE plan built only from real data.
 
-Action types (put them in "actions"):
-- enroll_driver: book a driver into a session {{"type":"enroll_driver","driver_id":int,"session_id":int|"new:N"}}
-- move_driver: move a booked driver from one session to another {{"type":"move_driver","driver_id":int,"from_session_id":int,"to_session_id":int|"new:N"}}
-- add_session: create a session {{"type":"add_session","temp_ref":"new:N","course_id":int,"trainer_id":int,"start":"YYYY-MM-DDTHH:MM:00","end":"YYYY-MM-DDTHH:MM:00","location":str,"capacity":int}}
-A new session must come BEFORE any action that uses its temp_ref (new:1, new:2, ...).
+Plan JSON: {"course_id":int,"rationale":str,"actions":[...]} where each action is one of
+{"type":"enroll_driver","driver_id":int,"session_id":int|"new:N"}
+{"type":"move_driver","driver_id":int,"from_session_id":int,"to_session_id":int|"new:N"}
+{"type":"add_session","temp_ref":"new:N","course_id":int,"trainer_id":int,"start":"YYYY-MM-DDTHH:MM:00","end":"YYYY-MM-DDTHH:MM:00","location":str,"capacity":int}
+Create a new session (add_session) before any action that uses its temp_ref.
 
-Plan JSON schema (JSON Schema):
-{_plan_schema_text()}
+Rules (a checker rejects any violation): never exceed session capacity (new sessions: at most the course default); only active drivers who are available, off shift, not yet trained in this course this year and not already booked for it; one session per driver per day with 12h rest; trainers cannot overlap or exceed their weekly limit; no past sessions; new sessions run Sunday-Thursday starting 09:00, 14:00 or 18:00.
 
-Hard rules (a checker rejects any plan that breaks one):
-- Never exceed a session's capacity. A new session's capacity is at most the course default capacity.
-- Never book a driver who is unavailable, on shift, active=false, already trained in this course this year, or already booked for this course.
-- Shifts: no session during or soon after a driver's shift; night-shift drivers cannot start before 12:00 the morning after.
-- A driver gets at most one session per day and at least 12 hours of rest between sessions.
-- A trainer cannot teach two overlapping sessions, nor exceed their weekly session limit.
-- Sessions that already started cannot be changed. New sessions must start after the current time, run Sunday to Thursday, start at 09:00, 14:00 or 18:00, and last as long as the slot tools show.
-
-How to work:
-1. Call get_alert_context first, then look things up with the other tools.
-2. Only use IDs returned by tools. Never invent a driver, session or trainer ID. Copy start/end times exactly as returned.
-3. Prefer drivers returned by find_eligible_drivers and slots returned by find_trainer_slots; they already pass the rules.
-4. Call validate_plan on your draft (at most 2 times), fix what it reports, then call submit_plan.
-5. Include a short "rationale" (1-3 sentences) in the plan. If no valid fix exists, call submit_no_plan with the reason.
-Be efficient: do not call tools you do not need."""
+Only use IDs and times returned by tools or given below. Use find_eligible_drivers for drivers and find_trainer_slots for new-session slots. Then call submit_plan (you may call validate_plan once first). If nothing valid exists, call submit_no_plan. Be brief; use few tool calls."""
 
 
-def sample_prompt(alert_id: int, course_id: int, strategy: str) -> str:
-    return (
-        f"Alert {alert_id} for course {course_id} is open. "
-        f"Approach for this attempt: {strategy}. "
-        "Start with get_alert_context, then build and submit a plan."
-    )
+def sample_prompt(alert_id: int, course_id: int, strategy: str, facts: str = "") -> str:
+    text = f"Alert {alert_id}, course {course_id}. Approach for this attempt: {strategy}."
+    if facts:
+        text += "\nFacts already looked up for you (real data):\n" + facts
+    return text

@@ -146,7 +146,7 @@ def test_results_are_capped(adb):
     slots = tool(adb, "find_trainer_slots", course_id=course_id, limit=1000)
     assert len(slots["slots"]) <= MAX_TOOL_ROWS
     assert slots["truncated"] == (slots["total_matching"] > MAX_TOOL_ROWS)
-    sessions = tool(adb, "list_upcoming_sessions", course_id=course_id)
+    sessions = tool(adb, "list_upcoming_sessions", course_id=course_id, limit=1000)
     assert len(sessions["sessions"]) <= MAX_TOOL_ROWS
     assert sessions["truncated"] == (sessions["total_matching"] > MAX_TOOL_ROWS)
 
@@ -163,3 +163,13 @@ def test_every_registered_tool_has_a_spec():
     spec_names = {s["function"]["name"] for s in TOOL_SPECS}
     assert set(READ_ONLY_TOOLS) <= spec_names
     assert {"validate_plan", "submit_plan", "submit_no_plan"} <= spec_names
+
+
+def test_ids_sent_as_strings_still_work_and_specs_allow_them(adb):
+    course_id = course_of(adb)
+    session = sessions_with_free_seats(adb, course_id, 1)[0]
+    result = tool(adb, "find_eligible_drivers", course_id=str(course_id), session_id=str(session["session_id"]))
+    assert "error" not in result and result["drivers"]
+    for spec in TOOL_SPECS:
+        for prop in spec["function"]["parameters"]["properties"].values():
+            assert prop.get("type") != "integer"

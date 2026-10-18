@@ -27,8 +27,10 @@ from app.services.audit import log_event
 from app.services.constraints import CATEGORY, check_plan
 from app.services.sim_clock import get_sim_now
 
-MAX_VALIDATE_CALLS = 2
-MAX_TOKENS_PER_STEP = 2048
+MAX_VALIDATE_CALLS = 1
+TOOLS_CHARS = len(json.dumps(TOOL_SPECS))  # the tool schemas are sent with every request too
+MAX_TOKENS_PER_STEP = 800  # Groq counts this reserve against the per-minute token limit
+PREFETCH_SESSIONS = 5
 TRACE_TEXT_LIMIT = 500
 RATIONALE_AUDIT_LIMIT = 500
 
@@ -199,6 +201,29 @@ def _validate_for_agent(db: Session, now: datetime, alert: Alert, raw: Any, stat
     return result
 
 
+OMITTED_NOTE = '{"note":"older result omitted to save space; call the tool again if you need it"}'
+
+
+def prune_messages(messages: list[dict], budget_chars: int) -> int:
+    """Keep the request small: replace the oldest tool results with a short note until the request fits the budget.
+
+    Groq's free tier allows few tokens per minute and every step re-sends the whole conversation, so old tool
+    output is the first thing to drop. The assistant's own messages and the newest tool results are kept.
+    Returns how many tool results were replaced.
+    """
+    def size() -> int:
+        return len(json.dumps(messages, default=str)) + TOOLS_CHARS
+
+    replaced = 0
+    for message in messages:
+        if size() <= budget_chars:
+            break
+        if message.get("role") == "tool" and message.get("content") != OMITTED_NOTE and len(message.get("content", "")) > len(OMITTED_NOTE):
+            message["content"] = OMITTED_NOTE
+            replaced += 1
+    return replaced
+
+
 def _assistant_message(resp) -> dict:
     message: dict[str, Any] = {"role": "assistant", "content": resp.content}
     if resp.tool_calls:
@@ -211,12 +236,33 @@ def _assistant_message(resp) -> dict:
 def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, temperature: float, strategy: str) -> SampleState:
     """Let the model call tools until it submits (or runs out of steps). Raises LLMError if the LLM fails."""
     state = SampleState()
+    # Look up the basics ourselves, once, so the model does not spend steps (and tokens) asking for them.
+    facts = {
+        "alert": run_read_only_tool(db, now, "get_alert_context", {"alert_id": alert.id}),
+        "sessions_with_free_seats": run_read_only_tool(
+            db, now, "list_upcoming_sessions", {"course_id": alert.course_id, "min_free_seats": 1, "limit": PREFETCH_SESSIONS}),
+    }
+    facts_text = json.dumps(facts, separators=(",", ":"), default=str)
+    state.trace.append({"note": "alert context and upcoming sessions were looked up by the server and put in the prompt"})
     state.messages = [
         {"role": "system", "content": prompts.system_prompt()},
-        {"role": "user", "content": prompts.sample_prompt(alert.id, alert.course_id, strategy)},
+        {"role": "user", "content": prompts.sample_prompt(alert.id, alert.course_id, strategy, facts_text)},
     ]
     for _ in range(settings.planner_max_steps):
-        resp = llm.chat(state.messages, tools=TOOL_SPECS, temperature=temperature, max_tokens=MAX_TOKENS_PER_STEP)
+        pruned = prune_messages(state.messages, settings.planner_context_char_budget)
+        if pruned:
+            state.trace.append({"note": f"{pruned} old tool result(s) dropped from the prompt to stay under the size budget"})
+        try:
+            resp = llm.chat(state.messages, tools=TOOL_SPECS, temperature=temperature, max_tokens=MAX_TOKENS_PER_STEP)
+        except LLMError as err:
+            if err.kind != "bad_request" or "validation failed" not in err.message.lower():
+                raise
+            # The provider rejected the model's tool call (e.g. wrong argument type). That is the model's mistake,
+            # not an outage: tell it and let it try again, like any other malformed tool call.
+            state.n_steps += 1
+            state.trace.append({"step": state.n_steps, "note": f"provider rejected the tool call: {_cut(err.message, 300)}"})
+            state.messages.append({"role": "user", "content": "Your last tool call was rejected as invalid. Send ids as plain integers and try again."})
+            continue
         state.n_steps += 1
         state.tokens += resp.usage.total_tokens
         state.model = resp.model or state.model
@@ -373,6 +419,8 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
     seen_hashes: set[str] = set()
     try:
         for index in range(run.n_requested):
+            if index > 0 and settings.planner_sample_pause_seconds > 0:
+                time.sleep(settings.planner_sample_pause_seconds)
             temperature = prompts.pick_temperature(index)
             strategy = prompts.pick_strategy(alert.shortfall_type, index)
             sample_started = time.monotonic()

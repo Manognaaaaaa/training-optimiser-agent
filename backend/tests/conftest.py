@@ -72,3 +72,9 @@ def aengine(alert_template):
 def adb(aengine):
     with Session(aengine, expire_on_commit=False, autoflush=False) as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def no_planner_pause(monkeypatch):
+    """The real pause between planner samples would only slow the tests down."""
+    monkeypatch.setattr("app.config.settings.planner_sample_pause_seconds", 0)

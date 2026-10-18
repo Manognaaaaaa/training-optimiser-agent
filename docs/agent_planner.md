@@ -19,7 +19,7 @@ Not in this phase: scoring and ranking, fairness penalties, LLM alert text, appr
 | `app/llm/base.py` | `LLMClient` protocol, `LLMResponse`, `ToolCall`, `LLMError(kind)` |
 | `app/llm/groq_client.py` | `GroqClient` (httpx, OpenAI-compatible tool calling, 3 attempts on 429 / 5xx, honours `retry-after`) |
 | `app/llm/fake.py` | `FakeLLMClient(script)` for tests |
-| `app/llm/prompts.py` | `PROMPT_VERSION = "p5-v1"`, system prompt (plan schema is generated from `Plan.model_json_schema()`), strategies, temperatures |
+| `app/llm/prompts.py` | `PROMPT_VERSION = "p5-v1"`, short system prompt (hand-written action formats, about 800 tokens), strategies, temperatures |
 | `app/llm/tools.py` | the read-only tools and their JSON schemas |
 | `app/llm/planner.py` | the agent loop, plan storage, dedupe, hallucination check, audit |
 | `app/routers/planner.py` | `POST/GET /api/planner/runs`, `GET /api/planner/metrics` |
@@ -29,7 +29,7 @@ Not in this phase: scoring and ranking, fairness penalties, LLM alert text, appr
 ## The loop (one sample)
 
 1. Pick a **temperature** and a **strategy hint** (below). Build `[system, user]` messages.
-2. Send messages + tool specs. Run each tool call (read-only tools through `run_read_only_tool`; `validate_plan`, `submit_plan`, `submit_no_plan` inside the planner). Append results. Repeat until `submit_plan` / `submit_no_plan` or `planner_max_steps` (default 12).
+2. Send messages + tool specs. Run each tool call (read-only tools through `run_read_only_tool`; `validate_plan`, `submit_plan`, `submit_no_plan` inside the planner). Append results. Repeat until `submit_plan` / `submit_no_plan` or `planner_max_steps` (default 8).
 3. Malformed tool arguments: an error message goes back to the model and the loop continues (it costs a step). If the model answers in plain text instead of calling a tool, the first reply is searched for a JSON object once; later text replies get a nudge to call `submit_plan`.
 4. The server overwrites `course_id` and `alert_id` with the alert's values (a note goes in the trace if the model used different ones), then `parse_plan` + `check_plan`.
 
@@ -48,7 +48,7 @@ All results are compact JSON, capped at `MAX_TOOL_ROWS = 25` rows (`"truncated":
 | `get_session_roster(session_id)` | booked drivers: id, name, shift, depot | none |
 | `find_eligible_drivers(course_id, session_id, limit?, move_from_session_id?)` | drivers who can be booked into the session | every `BOOKING_RULES` rule, through `driver_can_book` |
 | `find_trainer_slots(course_id, from_date?, to_date?, limit?)` | `(trainer_id, start, end)` slots for a new session | every `ADD_SESSION_RULES` rule, through `trainer_can_run` |
-| `validate_plan(plan)` | `is_valid` + violations from the real checker; **max 2 calls per sample** | all of `check_plan` |
+| `validate_plan(plan)` | `is_valid` + violations from the real checker; **max 1 call per sample** | all of `check_plan` |
 | `submit_plan(plan)` | ends the sample | |
 | `submit_no_plan(reason)` | ends the sample, counted as `no_plan` | |
 
@@ -57,6 +57,10 @@ All results are compact JSON, capped at `MAX_TOOL_ROWS = 25` rows (`"truncated":
 `find_trainer_slots` tries start times on a fixed grid: Sunday to Thursday at 09:00, 14:00 and 18:00 (`SESSION_START_HOURS` / `SESSION_WEEKDAYS` from `simulator/rules.py`, the same slots the ERP enforces) and keeps those with no violation.
 
 The helpers `driver_can_book` and `trainer_can_run` in `services/constraints.py` call the existing rule lists, so a tool can never offer something the checker would refuse. No rule behaviour changed; `load_snapshot_for_ids` is `load_snapshot` split so the tools can ask about many candidates with one read.
+
+## Token budget (Groq free tier)
+
+Free-tier limits are small (for example 8,000 tokens per minute and 200,000 per day on `openai/gpt-oss-120b`), and every step re-sends the conversation. So the planner: looks up the alert context and the first upcoming sessions with free seats itself and puts them in the first prompt; keeps the system prompt short; defaults tool lists to 6 rows; reserves only 800 reply tokens; and drops the oldest tool results when a request passes `PLANNER_CONTEXT_CHAR_BUDGET` characters. A 429 with a long `retry-after` (a daily limit) fails fast with Groq's message.
 
 ## Strategy hints and temperatures
 

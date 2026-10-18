@@ -55,7 +55,7 @@ def test_retries_on_429_then_succeeds_and_honours_retry_after():
     assert len(calls) == 2 and sleeps == [3.0] and resp.usage.total_tokens == 10
 
 
-def test_gives_up_after_three_attempts():
+def test_gives_up_after_six_attempts():
     calls = []
 
     def handler(request):
@@ -64,7 +64,7 @@ def test_gives_up_after_three_attempts():
 
     with pytest.raises(LLMError) as err:
         client_with(handler).chat([{"role": "user", "content": "hi"}])
-    assert err.value.kind == "server" and len(calls) == 3
+    assert err.value.kind == "server" and len(calls) == 6
 
 
 def test_401_is_auth_error_and_not_retried():
@@ -103,3 +103,30 @@ def test_get_llm_client_unavailable_without_key(monkeypatch):
     with pytest.raises(LLMError) as err:
         get_llm_client()
     assert err.value.kind == "unavailable" and "GROQ_API_KEY" in err.value.message
+
+
+def test_rate_limit_without_retry_after_waits_longer_each_time_then_succeeds():
+    calls, sleeps = [], []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) <= 3:
+            return httpx.Response(429, json={"error": {"message": "tokens per minute"}})
+        return httpx.Response(200, json=OK_BODY)
+
+    resp = client_with(handler, sleeps).chat([{"role": "user", "content": "hi"}])
+    assert resp.usage.total_tokens == 10 and len(calls) == 4
+    assert sleeps == [15.0, 30.0, 45.0]
+
+
+def test_long_retry_after_means_a_daily_limit_and_fails_fast_with_the_reason():
+    sleeps, calls = [], []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(429, headers={"retry-after": "3600"}, json={"error": {"message": "tokens per day (TPD) limit reached"}})
+
+    with pytest.raises(LLMError) as err:
+        client_with(handler, sleeps).chat([{"role": "user", "content": "hi"}])
+    assert err.value.kind == "rate_limit" and len(calls) == 1 and sleeps == []
+    assert "60 min" in err.value.message and "TPD" in err.value.message
