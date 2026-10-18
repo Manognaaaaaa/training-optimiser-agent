@@ -4,13 +4,22 @@ A mini ERP for a driver training department. It tracks annual training targets a
 
 Full brief: [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md)
 
+## How the AI part works
+
+1. The forecast flags a course that is likely to miss its yearly target and opens an **alert**.
+2. The **agent planner** (an LLM) is asked for N candidate plans. It can only look at data through **read-only tools** (upcoming sessions, rosters, eligible drivers, free trainer slots). It never writes to the database.
+3. Each plan comes back in a strict JSON format and is re-checked **on the server** by a plain-Python **constraint checker** (capacity, availability, shifts, rest, trainer load, double booking, unknown IDs).
+4. Every plan is stored, valid or not, with a full trace. An independent check counts invented IDs, so we can measure how often the model hallucinates and how often the checker catches it.
+
+Details: [docs/agent_planner.md](docs/agent_planner.md) and [docs/constraint_rules.md](docs/constraint_rules.md).
+
 ## Stack
 
 - **Backend:** FastAPI (Python 3.12), SQLAlchemy 2.0, pydantic-settings
 - **Frontend:** React + Vite + TypeScript, Tailwind CSS, React Router
 - **Database:** SQLite in dev, Postgres when deployed
-- **LLM:** Groq API (`GROQ_API_KEY`, `GROQ_MODEL` in `backend/.env`), behind one interface in `backend/app/llm/` (wired in Phase 5)
-- **Calendar:** Google Calendar API (sandbox calendar)
+- **LLM:** any OpenAI-compatible chat API with tool calling, behind one interface in `backend/app/llm/`. Groq by default; a local Ollama model also works (see below)
+- **Calendar:** Google Calendar API (sandbox calendar), planned for Phase 7
 
 ## Running it (Windows, PowerShell)
 
@@ -35,7 +44,7 @@ uvicorn app.main:app --reload
 ```
 
 The API runs on http://localhost:8000 and the interactive docs are at http://localhost:8000/docs.
-Check http://localhost:8000/api/health: it should return `{"status":"ok","database":"ok","tables":12}`.
+Check http://localhost:8000/api/health: it should return `{"status":"ok","database":"ok","tables":13}`.
 
 ### Synthetic data and simulator (Phase 1)
 
@@ -44,24 +53,49 @@ Run from `backend/` with the virtual environment active. The app needs seeded da
 ```powershell
 python -m app.simulator.seed --seed 42 --reset   # drop and regenerate the 2026 year (same seed = same data)
 python -m app.simulator.report                   # writes docs/synthetic_data_report.md
-pytest -q                                        # tests use an in-memory database
+pytest -q                                        # 216 tests, all with an in-memory database and a fake LLM (no network)
 ```
 
-The Simulation page (http://localhost:5173/simulation) moves the simulated clock forward; the same controls exist at `/api/sim/advance`, `/api/sim/state`, `/api/sim/progress` and `/api/sim/reset` (see `/docs`).
+The Simulation page (http://localhost:5173/simulation) moves the simulated clock forward; the same controls exist at `/api/sim/advance`, `/api/sim/state`, `/api/sim/progress` and `/api/sim/reset` (see `/docs`). The clock cannot be moved while a planner run is in progress.
 
 ### Forecasting and risk flags (Phase 3)
 
 The Dashboard shows, per course, actual completions against the target pace, a year-end forecast with a 90% range, P(hit target), a risk level and the reasons. The forecast uses the sessions still on the calendar ("pipeline forecast"), not a blind trend line. After every simulated Saturday the engine stores a forecast snapshot and opens, updates or auto-resolves alerts (each change is audited).
 
-Phase 3 changed the schema (new `forecast_snapshots` table, three new columns on `alerts`). If you have an older `training.db`, delete it and re-seed:
-
 ```powershell
-cd backend
-python -m app.simulator.seed --seed 42 --reset
 python -m app.services.forecast_backtest --seeds 42 1 2 3 4   # writes docs/forecast_backtest.md (about 2 minutes)
 ```
 
 API: `/api/tracking/summary`, `/api/tracking/courses`, `/api/tracking/courses/{id}`, `/api/tracking/series`, `POST /api/tracking/recompute`, `/api/alerts`.
+
+### Constraint checker (Phase 4)
+
+`POST /api/constraints/check` is a dry run: send a plan, get back every rule it breaks (24 violation codes in 8 categories) and nothing is written. Rules are listed in [docs/constraint_rules.md](docs/constraint_rules.md).
+
+### Agent planner (Phase 5)
+
+1. Put an LLM key in `backend/.env` (it is git-ignored; never commit it):
+
+   ```
+   GROQ_API_KEY=your_key
+   GROQ_MODEL=openai/gpt-oss-120b
+   ```
+
+   The model must support tool calling. Without a key the planner returns a clear 503 and everything else still works.
+
+   **Free tiers are small.** Groq's free tier allows about 8,000 tokens per minute and 200,000 per day for that model. The planner keeps prompts short and retries rate limits, but a full run can still hit the daily cap. A local model has no limits: install [Ollama](https://ollama.com), run `ollama pull qwen2.5:7b`, then set `GROQ_API_KEY=ollama`, `GROQ_BASE_URL=http://localhost:11434/v1`, `GROQ_MODEL=qwen2.5:7b` and `LLM_TIMEOUT_SECONDS=600`.
+
+2. Seed, advance about 20 weeks on the Simulation page, open a course that has an open alert (Dashboard, then the course), and press **Generate plans**. You see progress, then each plan with its outcome (valid, invalid, schema invalid, no plan), the rules it broke, and the model's rationale. There is no approve button yet (Phase 6).
+
+3. Live smoke test against the real model (uses its own `smoke.db`, never `training.db`, and writes [docs/planner_report.md](docs/planner_report.md)):
+
+   ```powershell
+   python -m scripts.planner_smoke --n 3 --alerts 1
+   ```
+
+API: `POST /api/planner/runs`, `GET /api/planner/runs`, `GET /api/planner/runs/{id}`, `GET /api/planner/metrics`.
+
+**Latest live result** (local `qwen2.5:7b`, 3 samples for one capacity-gap alert): 2 valid, 1 invalid (a driver who was unavailable, caught by the checker), 0 invented IDs. See the report for the example plan and cost per sample.
 
 ### Frontend
 
@@ -82,11 +116,23 @@ npm run dev
 
 Open http://localhost:5173. The sidebar footer shows a green "API connected" badge when the backend is running, and a red "API offline" badge when it is not.
 
+### After pulling a schema change
+
+Phases 3 and 5 changed the database schema. If you have an older `backend/training.db`, delete it and re-seed:
+
+```powershell
+cd backend
+Remove-Item training.db
+python -m app.simulator.seed --seed 42 --reset
+```
+
 ## Structure
 
-- `backend/` : API, simulator, agent, services
+- `backend/` : API, simulator, constraint checker, agent planner, services, tests
+  - `app/llm/` : LLM client (Groq or any OpenAI-compatible API), fake client for tests, prompts, read-only agent tools, planner loop
+  - `scripts/planner_smoke.py` : live planner test and report
 - `frontend/` : React app
-- `docs/` : project brief and notes
+- `docs/` : project brief, constraint rules, planner notes and reports
 
 ## Build phases
 
@@ -96,9 +142,13 @@ Open http://localhost:5173. The sidebar footer shows a green "API connected" bad
 | 1 | Synthetic data + simulator | Done |
 | 2 | ERP core: CRUD pages + calendar view | Done |
 | 3 | Tracking + forecasting: dashboard charts, shortfall risk flags | Done |
-| 4 | Constraint checker (built before the agent) | |
-| 5 | Agent planner: LLM produces N structured plans from real DB lookups | |
+| 4 | Constraint checker (built before the agent) | Done |
+| 5 | Agent planner: LLM produces N structured plans from real DB lookups | Done |
 | 6 | Ranking + alerts inbox: scored plans, LLM alerts, Approve / Reject | |
 | 7 | Calendar sync + live updates | |
 | 8 | Responsible AI: audit log, fairness panel, hallucination catch rate | |
 | 9 | Eval, polish, deploy | |
+
+## Known gaps
+
+- The checker does not yet enforce the ERP's session-slot rule (Sunday to Thursday, 09:00 / 14:00 / 18:00 starts) for new sessions the agent adds. The tools and prompt steer the model to valid slots, but the rule should move into the checker before approved plans create sessions (Phase 6/7).
