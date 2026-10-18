@@ -7,6 +7,7 @@ import CourseChart from '../components/charts/CourseChart'
 import ForecastHistory from '../components/charts/ForecastHistory'
 import GroupBars from '../components/charts/GroupBars'
 import WeeklyBars from '../components/charts/WeeklyBars'
+import PlannerPanel from '../components/PlannerPanel'
 import SessionDrawer from '../components/SessionDrawer'
 import { fmtDateTime } from '../utils/datetime'
 import { SHORTFALL_LABEL, fmtProb, fmtRange, shortfallSentence } from '../utils/tracking'
@@ -95,6 +96,7 @@ export default function CourseDetail() {
 
       <CourseChart series={d.series} target={c.target} events={d.events} />
       <ReasonsPanel reasons={c.reasons} />
+      <PlannerPanel courseId={courseId} />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <GroupBars title="Who is behind: by shift" rows={d.breakdown.shift} />

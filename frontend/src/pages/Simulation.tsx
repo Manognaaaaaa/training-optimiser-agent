@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 import { listAlerts, type Alert } from '../api/alerts'
+import { isRunActive, listPlannerRuns } from '../api/planner'
 import { RiskBadge } from '../components/Badge'
 import {
   advanceSim,
@@ -47,6 +48,9 @@ export default function Simulation() {
   const [error, setError] = useState<string | null>(null)
 
   const queryClient = useQueryClient()
+  // While the planner works from a snapshot of "now", the backend refuses to move the clock (409).
+  const plannerRuns = useQuery({ queryKey: ['planner', 'runs', 'all'], queryFn: () => listPlannerRuns(), refetchInterval: 3000 })
+  const plannerActive = plannerRuns.data?.some((r) => isRunActive(r)) ?? false
   const alerts = useQuery({
     queryKey: ['alerts', 'since', summary?.from_time],
     queryFn: () => listAlerts({ since: summary!.from_time }),
@@ -142,7 +146,7 @@ export default function Simulation() {
             <button
               key={b.days}
               className={buttonClass}
-              disabled={busy || state?.year_ended}
+              disabled={busy || plannerActive || state?.year_ended}
               onClick={() => onAdvance(b.days)}
             >
               {b.label}
@@ -150,12 +154,13 @@ export default function Simulation() {
           ))}
           <button
             className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-            disabled={busy}
+            disabled={busy || plannerActive}
             onClick={onReset}
           >
             Reset
           </button>
           {busy && <span className="self-center text-sm text-slate-500">Working…</span>}
+          {plannerActive && <span className="self-center text-sm text-amber-700">Planner running, the clock is paused</span>}
         </div>
       </section>
 
