@@ -7,15 +7,21 @@ from fastapi.responses import JSONResponse
 
 from app import models  # noqa: F401  (registers all tables on Base.metadata)
 from app.config import settings
-from app.database import Base, engine
-from app.routers import alerts, calendar, constraints, courses, drivers, health, sessions, sim, tracking, trainers
+from app.database import Base, SessionLocal, engine
+from app.llm.base import LLMError
+from app.llm.planner import mark_stale_runs_failed
+from app.routers import (
+    alerts, calendar, constraints, courses, drivers, health, planner, sessions, sim, tracking, trainers,
+)
 from app.services.errors import ApiError
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create any missing tables when the server starts."""
+    """Create any missing tables when the server starts, and fail planner runs a crash left half-done."""
     Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        mark_stale_runs_failed(db)
     yield
 
 
@@ -38,6 +44,13 @@ async def api_error_handler(request: Request, exc: ApiError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "errors": exc.errors})
 
 
+@app.exception_handler(LLMError)
+async def llm_error_handler(request: Request, exc: LLMError):
+    """No key configured -> 503 with a clear message. Any other LLM failure -> 502."""
+    status = 503 if exc.kind == "unavailable" else 502
+    return JSONResponse(status_code=status, content={"detail": exc.message, "errors": {}, "kind": exc.kind})
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     """Turn pydantic's list of errors into one readable string plus a {field: message} map for forms."""
@@ -53,6 +66,6 @@ app.include_router(health.router, prefix="/api")
 app.include_router(sim.router, prefix="/api")
 for _router in (
     drivers.router, trainers.router, courses.router, sessions.router, calendar.router, tracking.router, alerts.router,
-    constraints.router,
+    constraints.router, planner.router,
 ):
     app.include_router(_router, prefix="/api")

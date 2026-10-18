@@ -44,17 +44,63 @@ class ForecastSnapshot(Base):
     shortfall_type: Mapped[str] = mapped_column(String(20))
 
 
+class PlannerRun(Base):
+    """One click of "Generate plans": N samples for one alert. Times are simulated, except duration_ms (real wall time)."""
+
+    __tablename__ = "planner_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id"))
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"))
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued / running / done / failed
+    n_requested: Mapped[int] = mapped_column(Integer)
+    n_valid: Mapped[int] = mapped_column(Integer, default=0)
+    n_invalid: Mapped[int] = mapped_column(Integer, default=0)
+    n_schema_invalid: Mapped[int] = mapped_column(Integer, default=0)
+    n_no_plan: Mapped[int] = mapped_column(Integer, default=0)
+    n_step_limit: Mapped[int] = mapped_column(Integer, default=0)
+    n_duplicates: Mapped[int] = mapped_column(Integer, default=0)
+    n_llm_errors: Mapped[int] = mapped_column(Integer, default=0)
+    model: Mapped[str] = mapped_column(String(100), default="")
+    prompt_version: Mapped[str] = mapped_column(String(20), default="")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
 class Plan(Base):
+    """One candidate plan from the agent (one sample of a planner run), valid or not."""
+
     __tablename__ = "plans"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id"))
     actions: Mapped[Any] = mapped_column(JSON)  # list of structured actions proposed by the agent
     is_valid: Mapped[bool] = mapped_column(Boolean, default=False)
-    rejection_reasons: Mapped[Any] = mapped_column(JSON, default=list)
-    score: Mapped[float | None] = mapped_column(Float, default=None)
-    rank: Mapped[int | None] = mapped_column(Integer, default=None)
+    rejection_reasons: Mapped[Any] = mapped_column(JSON, default=list)  # final checker violations, as dicts
+    score: Mapped[float | None] = mapped_column(Float, default=None)  # Phase 6
+    rank: Mapped[int | None] = mapped_column(Integer, default=None)  # Phase 6
     status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed / approved / rejected
+    # Phase 5
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("planner_runs.id"), default=None)
+    sample_index: Mapped[int | None] = mapped_column(Integer, default=None)
+    temperature: Mapped[float | None] = mapped_column(Float, default=None)
+    strategy: Mapped[str | None] = mapped_column(String(200), default=None)
+    outcome: Mapped[str | None] = mapped_column(String(20), default=None)  # valid / invalid / schema_invalid / no_plan / step_limit
+    rationale: Mapped[str | None] = mapped_column(Text, default=None)
+    plan_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    is_duplicate: Mapped[bool] = mapped_column(Boolean, default=False)
+    draft_violations: Mapped[Any] = mapped_column(JSON, default=list)  # results of the agent's own validate_plan calls
+    fabricated_ids: Mapped[Any] = mapped_column(JSON, default=list)  # [{"type": "driver", "id": 99999}, ...]
+    checker_caught: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    trace: Mapped[Any] = mapped_column(JSON, default=list)
+    n_steps: Mapped[int] = mapped_column(Integer, default=0)
+    n_validate_calls: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # simulated time
 
 
 class AuditLog(Base):

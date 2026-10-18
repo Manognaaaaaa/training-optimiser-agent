@@ -152,7 +152,16 @@ def _referenced_ids(plan: Plan) -> tuple[set[int], set[int], set[int], set[int]]
 def load_snapshot(db: Session, plan: Plan, now: datetime) -> Snapshot:
     """Read everything the plan touches. Read-only: only SELECT statements are used."""
     driver_ids, session_ids, trainer_ids, course_ids = _referenced_ids(plan)
-    snap = Snapshot(now=now, plan_course_id=plan.course_id)
+    return load_snapshot_for_ids(db, plan.course_id, now, driver_ids, session_ids, trainer_ids, course_ids)
+
+
+def load_snapshot_for_ids(
+    db: Session, plan_course_id: int, now: datetime,
+    driver_ids: set[int], session_ids: set[int], trainer_ids: set[int], course_ids: set[int] | None = None,
+) -> Snapshot:
+    """Like ``load_snapshot`` but from explicit ids. The Phase 5 agent tools use it to ask "would this pass?" for many candidates at once."""
+    course_ids = (course_ids or set()) | {plan_course_id}
+    snap = Snapshot(now=now, plan_course_id=plan_course_id)
 
     snap.courses = {c.id: c for c in db.scalars(select(Course).where(Course.id.in_(course_ids)))}
     snap.drivers = {d.id: d for d in db.scalars(select(Driver).where(Driver.id.in_(driver_ids)))}
@@ -191,7 +200,7 @@ def load_snapshot(db: Session, plan: Plan, now: datetime) -> Snapshot:
         .where(
             Enrollment.driver_id.in_(driver_ids),
             Enrollment.status == "attended",
-            TrainingSession.course_id == plan.course_id,
+            TrainingSession.course_id == plan_course_id,
             TrainingSession.start_time >= datetime(SIM_YEAR, 1, 1),
             TrainingSession.start_time < datetime(SIM_YEAR + 1, 1, 1),
         )
@@ -424,6 +433,21 @@ ADD_SESSION_RULES = [
     rule_add_trainer_double_booked,
     rule_add_trainer_weekly_load,
 ]
+
+
+# --- Public helpers for the Phase 5 agent tools ---------------------------------------------------
+# They call the same rule lists the checker uses, so a tool can never offer something the checker would refuse.
+def driver_can_book(snap: Snapshot, driver: Driver, session: SessionInfo) -> list[Violation]:
+    """Violations for booking ``driver`` into ``session`` given the snapshot (empty list = allowed)."""
+    return booking_violations(snap, driver, session)
+
+
+def trainer_can_run(snap: Snapshot, action: AddSession) -> list[Violation]:
+    """Violations for creating the new session ``action`` (empty list = allowed)."""
+    found: list[Violation] = []
+    for rule in ADD_SESSION_RULES:
+        found.extend(rule(snap, action))
+    return found
 
 
 # --- Applying the actions ------------------------------------------------------------------------

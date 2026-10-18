@@ -8,11 +8,19 @@ from app.schemas.sim import (
     AdvanceRequest, AdvanceSummary, CourseProgress, ResetRequest, SimStateOut, SimTotals,
 )
 from app.services.sim_clock import get_sim_now
+from app.llm.planner import active_run_exists
+from app.services.errors import Conflict
 from app.simulator import engine as sim_engine
 from app.simulator.rules import SIM_END, SIM_START, SIM_YEAR
 from app.simulator.seed import reseed
 
 router = APIRouter(prefix="/sim", tags=["simulation"])
+
+
+def _block_while_planning(db: Session) -> None:
+    """The clock and the data must not move while the agent is working from a snapshot of "now"."""
+    if active_run_exists(db):
+        raise Conflict("A planner run is in progress")
 
 
 def _count(db: Session, model, *conditions) -> int:
@@ -56,12 +64,14 @@ def get_state(db: Session = Depends(get_db)):
 @router.post("/advance", response_model=AdvanceSummary)
 def advance_clock(body: AdvanceRequest, db: Session = Depends(get_db)):
     """Play the simulation forward by ``days`` days (stops at year end)."""
+    _block_while_planning(db)
     return sim_engine.advance(db, body.days)
 
 
 @router.post("/reset", response_model=SimStateOut)
 def reset(body: ResetRequest | None = None, db: Session = Depends(get_db)):
     """Wipe all data and regenerate it. Uses the given seed, else the current one, else 42."""
+    _block_while_planning(db)
     seed = body.seed if body and body.seed is not None else None
     if seed is None:
         try:

@@ -41,3 +41,34 @@ def client(engine):
     app.dependency_overrides[get_db] = override_db
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+# --- Phase 5: a seeded year played to week 20, so open alerts exist -----------------------------------
+def clone_engine(source):
+    """A private in-memory copy of a database, so tests that write (plans, runs, audit rows) never affect each other."""
+    copy = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    src, dst = source.raw_connection(), copy.raw_connection()
+    src.driver_connection.backup(dst.driver_connection)
+    return copy
+
+
+@pytest.fixture(scope="session")
+def alert_template():
+    """Seed 42 played 140 days (to 2026-05-21). Alert 1 is a capacity_gap, alert 6 an attendance_gap. Never modify it."""
+    from app.simulator.engine import advance
+
+    engine = make_seeded_engine()
+    with Session(engine, expire_on_commit=False, autoflush=False) as db:
+        advance(db, 140)
+    return engine
+
+
+@pytest.fixture()
+def aengine(alert_template):
+    return clone_engine(alert_template)
+
+
+@pytest.fixture()
+def adb(aengine):
+    with Session(aengine, expire_on_commit=False, autoflush=False) as session:
+        yield session
