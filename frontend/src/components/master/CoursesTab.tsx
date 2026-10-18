@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { createCourse, deleteCourse, listCourses, updateCourse, type Course } from '../../api/courses'
 import { useRefresh } from '../../hooks/useRefresh'
 import { useTableState } from '../../hooks/useTableState'
-import { Badge } from '../Badge'
+import { MandatoryBadge } from '../Badge'
 import ConfirmDialog from '../ConfirmDialog'
 import DataTable, { type Column } from '../DataTable'
 import FormModal, { Field, inputClass } from '../FormModal'
@@ -70,7 +70,7 @@ export default function CoursesTab() {
     { key: 'name', header: 'Name', sortKey: 'name', render: (c) => c.name },
     { key: 'dur', header: 'Duration', sortKey: 'duration_hours', render: (c) => `${c.duration_hours} h` },
     { key: 'cap', header: 'Capacity', sortKey: 'default_capacity', render: (c) => c.default_capacity },
-    { key: 'mand', header: 'Type', sortKey: 'is_mandatory', render: (c) => <Badge tone={c.is_mandatory ? 'red' : 'slate'}>{c.is_mandatory ? 'mandatory' : 'optional'}</Badge> },
+    { key: 'mand', header: 'Type', sortKey: 'is_mandatory', render: (c) => <MandatoryBadge mandatory={c.is_mandatory} /> },
     { key: 'target', header: '2026 target', sortKey: 'target_completions', render: (c) => c.target_completions ?? '—' },
     {
       key: 'actions', header: '', render: (c) => (
@@ -85,7 +85,7 @@ export default function CoursesTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700" onClick={() => setForm({})}>Add course</button>
+        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover" onClick={() => setForm({})}>Add course</button>
       </div>
       {list.isError && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{list.error.message}</div>}
       <DataTable

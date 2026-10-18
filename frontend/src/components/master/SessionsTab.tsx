@@ -63,7 +63,7 @@ export default function SessionsTab() {
         </select>
         <label className="text-xs text-slate-600">From<input type="date" className={`${inputClass} !w-40`} value={from} onChange={filter(setFrom)} /></label>
         <label className="text-xs text-slate-600">To<input type="date" className={`${inputClass} !w-40`} value={to} onChange={filter(setTo)} /></label>
-        <button className="ml-auto rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700" onClick={() => setCreating(true)}>
+        <button className="ml-auto rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover" onClick={() => setCreating(true)}>
           Add session
         </button>
       </div>

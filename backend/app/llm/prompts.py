@@ -50,7 +50,7 @@ Create a new session (add_session) before any action that uses its temp_ref.
 
 Rules (a checker rejects any violation): never exceed session capacity (new sessions: at most the course default); only active drivers who are available, off shift, not yet trained in this course this year and not already booked for it; one session per driver per day with 12h rest; trainers cannot overlap or exceed their weekly limit; no past sessions; new sessions run Sunday-Thursday starting 09:00, 14:00 or 18:00.
 
-Only use IDs and times returned by tools or given below. Use find_eligible_drivers for drivers and find_trainer_slots for new-session slots. Then call submit_plan (you may call validate_plan once first). If nothing valid exists, call submit_no_plan. Be brief; use few tool calls."""
+Only use IDs and times returned by tools or given below. The facts below usually contain everything you need (eligible drivers per session, open slots for new sessions): build the plan from them and call submit_plan right away. Call other tools only if the facts are not enough. If nothing valid exists, call submit_no_plan. Be brief; use few tool calls."""
 
 
 def sample_prompt(alert_id: int, course_id: int, strategy: str, facts: str = "") -> str:

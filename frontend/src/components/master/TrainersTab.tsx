@@ -74,7 +74,7 @@ export default function TrainersTab() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <input className={`${inputClass} !w-64`} placeholder="Search trainer…" value={search} onChange={(e) => { setSearch(e.target.value); table.setPage(1) }} />
-        <button className="ml-auto rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700" onClick={() => setForm({})}>Add trainer</button>
+        <button className="ml-auto rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover" onClick={() => setForm({})}>Add trainer</button>
       </div>
       {list.isError && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{list.error.message}</div>}
       <DataTable

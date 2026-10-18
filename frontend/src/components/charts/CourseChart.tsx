@@ -36,10 +36,10 @@ export default function CourseChart({ series, target, events }: { series: Series
 
   return (
     <ChartCard
-      title="Cumulative completions vs target"
-      note="Solid = actual, dashed = target pace, dotted = forecast with 90% range"
+      title="Progress through the year"
+      note="Solid line: completed so far. Dashed: where the course should be. Dotted and shaded: forecast and likely range. Yellow line: today."
       table={{
-        head: ['Date', 'Actual', 'Target pace', 'Forecast', 'Range low', 'Range high'],
+        head: ['Date', 'Done so far', 'Should be', 'Forecast', 'Likely low', 'Likely high'],
         rows: series.map((p) => [
           dayLabel(parseApi(p.date).getTime()), round(p.actual), round(p.target_pace), round(p.forecast_mean),
           round(p.forecast_low), round(p.forecast_high),
@@ -54,31 +54,31 @@ export default function CourseChart({ series, target, events }: { series: Series
               dataKey="t" type="number" scale="time" domain={[ticks[0], data[data.length - 1].t]} ticks={ticks}
               tickFormatter={monthName} tick={{ fontSize: 11, fill: SERIES.axis }} tickLine={false}
             />
-            <YAxis domain={[0, yMax]} tick={{ fontSize: 11, fill: SERIES.axis }} tickLine={false} axisLine={false} width={40} />
+            <YAxis label={{ value: 'Completions', angle: -90, position: 'insideLeft', fontSize: 11, fill: SERIES.axis }} domain={[0, yMax]} tick={{ fontSize: 11, fill: SERIES.axis }} tickLine={false} axisLine={false} width={48} />
             <Tooltip
               cursor={{ stroke: SERIES.axis, strokeDasharray: '3 3' }}
               content={(props: TipProps) => {
                 const row = props.active ? (props.payload?.[0]?.payload as Row | undefined) : undefined
                 if (!row) return null
                 const rows: [string, string][] = []
-                if (row.actual !== null) rows.push(['Actual', round(row.actual)])
-                rows.push(['Target pace', round(row.pace)])
+                if (row.actual !== null) rows.push(['Done so far', round(row.actual)])
+                rows.push(['Should be', round(row.pace)])
                 if (row.forecast !== null) rows.push(['Forecast', round(row.forecast)])
-                if (row.band) rows.push(['90% range', `${round(row.band[0])} to ${round(row.band[1])}`])
+                if (row.band) rows.push(['Likely range', `${round(row.band[0])} to ${round(row.band[1])}`])
                 return <TooltipBox title={dayLabel(row.t)} rows={rows} />
               }}
             />
             <Legend verticalAlign="top" height={28} iconType="plainline" wrapperStyle={{ fontSize: 12 }} />
-            <Area dataKey="band" name="90% range" stroke="none" fill={SERIES.band} fillOpacity={0.15} isAnimationActive={false} legendType="square" />
-            <Line dataKey="pace" name="Target pace" stroke={SERIES.pace} strokeWidth={1.5} strokeDasharray="6 4" dot={false} isAnimationActive={false} />
+            <Area dataKey="band" name="Likely range" stroke="none" fill={SERIES.band} fillOpacity={0.15} isAnimationActive={false} legendType="square" />
+            <Line dataKey="pace" name="Should be" stroke={SERIES.pace} strokeWidth={1.5} strokeDasharray="6 4" dot={false} isAnimationActive={false} />
             <Line dataKey="forecast" name="Forecast" stroke={SERIES.forecast} strokeWidth={2} strokeDasharray="2 4" strokeLinecap="round" dot={false} isAnimationActive={false} />
-            <Line dataKey="actual" name="Actual" stroke={SERIES.actual} strokeWidth={2} dot={false} isAnimationActive={false} />
+            <Line dataKey="actual" name="Done so far" stroke={SERIES.actual} strokeWidth={2} dot={false} isAnimationActive={false} />
             <ReferenceLine
               y={target} stroke={SERIES.target} strokeWidth={1}
               label={{ value: `Target ${target}`, position: 'insideTopLeft', fontSize: 11, fill: SERIES.target }}
             />
             {nowT !== null && (
-              <ReferenceLine x={nowT} stroke={SERIES.axis} strokeDasharray="3 3" label={{ value: 'Sim now', position: 'insideTopRight', fontSize: 11, fill: SERIES.axis }} />
+              <ReferenceLine x={nowT} stroke={SERIES.today} strokeWidth={2} label={{ value: 'Today', position: 'insideTopRight', fontSize: 11, fill: SERIES.target }} />
             )}
             {events.map((e, i) => {
               const t = parseApi(e.date).getTime()
@@ -98,7 +98,7 @@ export default function CourseChart({ series, target, events }: { series: Series
         </ResponsiveContainer>
       </div>
       {events.length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+        <ul className="mt-2 space-y-0.5 text-xs text-ink-muted">
           {events.map((e, i) => (
             <li key={i}>
               <span aria-hidden="true">◆</span> {dayLabel(parseApi(e.date).getTime())}: {e.label}

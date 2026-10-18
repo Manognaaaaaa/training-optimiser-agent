@@ -114,7 +114,14 @@ cd frontend
 npm run dev
 ```
 
-Open http://localhost:5173. The sidebar footer shows a green "API connected" badge when the backend is running, and a red "API offline" badge when it is not.
+Open http://localhost:5173. A small dot in the top bar is green when the backend is running and red when it is not. The yellow clock in the top bar is the simulated date; "Next day" and "Next week" move it forward.
+
+```powershell
+npm test          # unit tests for the wording and number formatting (src/lib/format.ts)
+npm run build     # type-check and production build
+```
+
+The design rules (colours, fonts, components, plain-language wording) are in [docs/design_system.md](docs/design_system.md).
 
 ### After pulling a schema change
 

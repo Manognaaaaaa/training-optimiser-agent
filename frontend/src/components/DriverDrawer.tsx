@@ -132,7 +132,7 @@ export default function DriverDrawer({ driverId, onClose, onEdit, onDeactivate }
               </div>
               <div className="flex gap-2">
                 <input className={inputClass} placeholder="Reason (e.g. annual leave)" value={reason} onChange={(e) => setReason(e.target.value)} required />
-                <button className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700">Add block</button>
+                <button className="rounded-md bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover">Add block</button>
               </div>
               <p className="text-xs text-slate-500">Upcoming bookings that overlap the block are cancelled.</p>
             </form>

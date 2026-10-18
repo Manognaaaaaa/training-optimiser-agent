@@ -1,45 +1,95 @@
 @import "tailwindcss";
+@import "./styles/tokens.css";
 
-/* --- FullCalendar: colour events by fill band (set in pages/Calendar.tsx) --- */
+/* --- FullCalendar, restyled to the design tokens. Event colour = how full the session is (classes set in pages/Calendar.tsx). --- */
+.fc {
+  --fc-border-color: var(--color-line);
+  --fc-page-bg-color: var(--color-surface);
+  --fc-neutral-bg-color: var(--color-canvas);
+  --fc-list-event-hover-bg-color: var(--color-canvas);
+  --fc-today-bg-color: transparent;
+  /* Road-sign yellow: only the "today" marker. */
+  --fc-now-indicator-color: var(--color-signal);
+  --fc-button-bg-color: var(--color-surface);
+  --fc-button-border-color: var(--color-line);
+  --fc-button-text-color: var(--color-ink);
+  --fc-button-hover-bg-color: var(--color-canvas);
+  --fc-button-hover-border-color: var(--color-line);
+  --fc-button-active-bg-color: var(--color-primary);
+  --fc-button-active-border-color: var(--color-primary);
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+}
+.fc .fc-toolbar-title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.fc .fc-button {
+  font-size: 0.875rem;
+  border-radius: var(--radius-control);
+  text-transform: none;
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  color: #fff;
+}
+.fc .fc-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.fc .fc-col-header-cell-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+  color: var(--color-ink-muted);
+  font-weight: 500;
+}
+.fc-event {
+  cursor: pointer;
+  border-radius: 4px;
+  border-width: 1px;
+}
 .fc-event.fc-band-low {
-  --fc-event-bg-color: #fecaca;
-  --fc-event-border-color: #ef4444;
-  --fc-event-text-color: #7f1d1d;
+  --fc-event-bg-color: var(--color-risk-medium-bg);
+  --fc-event-border-color: var(--color-risk-medium);
+  --fc-event-text-color: var(--color-ink);
 }
 .fc-event.fc-band-medium {
-  --fc-event-bg-color: #fde68a;
-  --fc-event-border-color: #f59e0b;
-  --fc-event-text-color: #78350f;
+  --fc-event-bg-color: var(--color-primary-soft);
+  --fc-event-border-color: var(--color-primary);
+  --fc-event-text-color: var(--color-ink);
 }
 .fc-event.fc-band-high {
-  --fc-event-bg-color: #a7f3d0;
-  --fc-event-border-color: #059669;
-  --fc-event-text-color: #064e3b;
+  --fc-event-bg-color: var(--color-risk-ok-bg);
+  --fc-event-border-color: var(--color-risk-ok);
+  --fc-event-text-color: var(--color-ink);
+}
+.fc-event.fc-band-full {
+  --fc-event-bg-color: var(--color-primary);
+  --fc-event-border-color: var(--color-primary);
+  --fc-event-text-color: #fff;
 }
 .fc-event.fc-band-cancelled {
-  --fc-event-bg-color: #e2e8f0;
-  --fc-event-border-color: #94a3b8;
-  --fc-event-text-color: #475569;
+  --fc-event-bg-color: var(--color-risk-unknown-bg);
+  --fc-event-border-color: var(--color-ink-muted);
+  --fc-event-text-color: var(--color-ink-muted);
   text-decoration: line-through;
 }
 /* Completed (past) sessions: muted and striped so past vs future is obvious */
 .fc-completed {
-  opacity: 0.7;
-  background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgba(255, 255, 255, 0.6) 6px 12px) !important;
-}
-.fc-event {
-  cursor: pointer;
+  opacity: 0.75;
+  background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgba(255, 255, 255, 0.55) 6px 12px) !important;
 }
 /* Friday and Saturday are not session days: greyed out but still shown */
 .fc-day-fri,
 .fc-day-sat {
-  background-color: #f1f5f9;
+  background-color: var(--color-canvas);
 }
 .fc-day-fri .fc-col-header-cell-cushion,
 .fc-day-sat .fc-col-header-cell-cushion {
-  color: #94a3b8;
+  color: var(--color-ink-muted);
+  opacity: 0.7;
 }
-.fc {
-  --fc-today-bg-color: rgba(59, 130, 246, 0.06);
-  --fc-now-indicator-color: #2563eb;
+.fc .fc-timegrid-now-indicator-line {
+  border-width: 2px 0 0;
 }

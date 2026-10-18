@@ -31,6 +31,9 @@ MAX_VALIDATE_CALLS = 1
 TOOLS_CHARS = len(json.dumps(TOOL_SPECS))  # the tool schemas are sent with every request too
 MAX_TOKENS_PER_STEP = 800  # Groq counts this reserve against the per-minute token limit
 PREFETCH_SESSIONS = 5
+PREFETCH_ELIGIBLE_SESSIONS = 2
+PREFETCH_DRIVERS_PER_SESSION = 6
+PREFETCH_SLOTS = 4
 TRACE_TEXT_LIMIT = 500
 RATIONALE_AUDIT_LIMIT = 500
 
@@ -233,6 +236,22 @@ def _assistant_message(resp) -> dict:
     return message
 
 
+def _prefetch_candidates(db: Session, now: datetime, alert: Alert, sessions: dict) -> dict:
+    """Drivers who can be booked into the first sessions, and open trainer slots. All from the same tools the model could call."""
+    out: dict[str, Any] = {}
+    by_session: dict[str, list] = {}
+    for session in (sessions.get("sessions") or [])[:PREFETCH_ELIGIBLE_SESSIONS]:
+        found = run_read_only_tool(db, now, "find_eligible_drivers", {
+            "course_id": alert.course_id, "session_id": session["session_id"], "limit": PREFETCH_DRIVERS_PER_SESSION})
+        by_session[str(session["session_id"])] = [{"driver_id": d["driver_id"], "name": d["name"]} for d in found.get("drivers", [])]
+    if by_session:
+        out["eligible_drivers_by_session_id"] = by_session
+    slots = run_read_only_tool(db, now, "find_trainer_slots", {"course_id": alert.course_id, "limit": PREFETCH_SLOTS})
+    if slots.get("slots"):
+        out["open_new_session_slots"] = slots["slots"]
+    return out
+
+
 def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, temperature: float, strategy: str) -> SampleState:
     """Let the model call tools until it submits (or runs out of steps). Raises LLMError if the LLM fails."""
     state = SampleState()
@@ -242,8 +261,9 @@ def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, tem
         "sessions_with_free_seats": run_read_only_tool(
             db, now, "list_upcoming_sessions", {"course_id": alert.course_id, "min_free_seats": 1, "limit": PREFETCH_SESSIONS}),
     }
+    facts.update(_prefetch_candidates(db, now, alert, facts["sessions_with_free_seats"]))
     facts_text = json.dumps(facts, separators=(",", ":"), default=str)
-    state.trace.append({"note": "alert context and upcoming sessions were looked up by the server and put in the prompt"})
+    state.trace.append({"note": "alert context, upcoming sessions, eligible drivers and open slots were looked up by the server and put in the prompt"})
     state.messages = [
         {"role": "system", "content": prompts.system_prompt()},
         {"role": "user", "content": prompts.sample_prompt(alert.id, alert.course_id, strategy, facts_text)},

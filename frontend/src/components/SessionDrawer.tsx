@@ -1,9 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   addEnrollment, cancelSession, getSession, listEligibleDrivers, listEnrollments, removeEnrollment,
 } from '../api/sessions'
 import { useDebounced } from '../hooks/useDebounced'
+import { ProgressBar } from './ui'
 import { useRefresh } from '../hooks/useRefresh'
 import { fmtDateTime, fmtTime } from '../utils/datetime'
 import { FillBadge, ShiftBadge, StatusBadge } from './Badge'
@@ -70,17 +72,22 @@ export default function SessionDrawer({ sessionId, onClose }: { sessionId: numbe
             }
           >
             <dl className="grid grid-cols-[8rem_1fr] gap-y-1.5 text-sm">
-              <dt className="text-slate-500">Course</dt><dd>{s.course_name} ({s.course_code})</dd>
+              <dt className="text-slate-500">Course</dt><dd><Link to={`/dashboard/courses/${s.course_id}`} className="text-primary hover:underline">{s.course_name} ({s.course_code})</Link></dd>
               <dt className="text-slate-500">When</dt><dd>{fmtDateTime(s.start_time)} to {fmtTime(s.end_time)}</dd>
               <dt className="text-slate-500">Trainer</dt><dd>{s.trainer_name}</dd>
               <dt className="text-slate-500">Location</dt><dd>{s.location}</dd>
               <dt className="text-slate-500">Status</dt><dd className="flex items-center gap-2"><StatusBadge status={s.status} /> <span className="text-slate-500">source: {s.source}</span></dd>
               <dt className="text-slate-500">Fill</dt>
               <dd className="flex items-center gap-2">
-                <FillBadge band={s.fill_band} rate={s.fill_rate} />
-                <span className="text-slate-500">
-                  {s.status === 'completed' ? `${s.attended} attended` : `${s.booked} booked`} / {s.capacity} seats
-                </span>
+                <div className="w-full space-y-1">
+                  <div className="flex items-center gap-2">
+                    <FillBadge band={s.fill_band} rate={s.fill_rate} />
+                    <span className="text-slate-500">
+                      {s.status === 'completed' ? `${s.attended} attended` : `${s.booked} booked`} of {s.capacity} seats
+                    </span>
+                  </div>
+                  <ProgressBar value={s.status === 'completed' ? s.attended : s.booked} max={s.capacity} label="Seats taken" />
+                </div>
               </dd>
             </dl>
           </Section>
@@ -108,12 +115,12 @@ export default function SessionDrawer({ sessionId, onClose }: { sessionId: numbe
             <Section
               title="Add driver"
               action={
-                <button className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white hover:bg-slate-700" onClick={() => setShowPicker((v) => !v)}>
+                <button className="rounded-md bg-primary px-3 py-1 text-sm text-white hover:bg-primary-hover" onClick={() => setShowPicker((v) => !v)}>
                   {showPicker ? 'Hide' : 'Find drivers'}
                 </button>
               }
             >
-              {booked >= s.capacity && <p className="text-sm text-amber-700">This session is full ({booked}/{s.capacity}).</p>}
+              {booked >= s.capacity && <p className="text-sm text-risk-medium">This session is full ({booked}/{s.capacity}).</p>}
               {showPicker && (
                 <div className="space-y-2">
                   <input className={inputClass} placeholder="Search name or code…" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />

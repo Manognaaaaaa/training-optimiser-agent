@@ -1,28 +1,59 @@
-import { createContext, useContext, useState, type FormEvent, type ReactNode } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { Children, cloneElement, createContext, isValidElement, useContext, useId, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError } from '../api/client'
+import { cn } from '../lib/cn'
+import { Button, ErrorState } from './ui'
 
 const FieldErrors = createContext<Record<string, string>>({})
 
-/** Shared Tailwind classes for inputs inside forms. */
+/** Shared classes for inputs inside forms. */
 export const inputClass =
-  'w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-100'
+  'w-full rounded-control border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted disabled:bg-canvas disabled:text-ink-muted'
+
+/** True when a child input is marked `required`, so the label can show the required marker. */
+const hasRequiredChild = (children: ReactNode) =>
+  Children.toArray(children).some((c) => isValidElement(c) && Boolean((c.props as { required?: boolean }).required))
 
 /** A labelled form field. `name` is the backend field name, used to show a 422 message under it. */
 export function Field({ label, name, children }: { label: string; name: string; children: ReactNode }) {
   const errors = useContext(FieldErrors)
+  const id = useId()
+  const required = hasRequiredChild(children)
   return (
-    <label className="block text-sm">
-      <span className="mb-1 block font-medium text-slate-700">{label}</span>
-      {children}
-      {errors[name] && <span className="mt-1 block text-xs text-red-600">{errors[name]}</span>}
-    </label>
+    <div className="block text-sm">
+      <label htmlFor={id} className="mb-1 block font-medium text-ink">
+        {label}
+        {required && <span className="ml-0.5 text-risk-high" aria-hidden="true">*</span>}
+        {required && <span className="sr-only"> (required)</span>}
+      </label>
+      <FieldInput id={id} invalid={Boolean(errors[name])}>{children}</FieldInput>
+      {errors[name] && <span role="alert" className="mt-1 block text-xs text-risk-high">{errors[name]}</span>}
+    </div>
+  )
+}
+
+/** Gives the first input child the label's id (and marks it invalid) without changing how forms are written. */
+function FieldInput({ id, invalid, children }: { id: string; invalid: boolean; children: ReactNode }) {
+  const items = Children.toArray(children)
+  const isControl = (c: ReactNode) => isValidElement(c) && typeof c.type === 'string' && ['input', 'select', 'textarea'].includes(c.type)
+  const firstControl = items.findIndex(isControl)
+  return (
+    <>
+      {items.map((child, i) => {
+        if (i !== firstControl || !isValidElement(child)) return child
+        const props = child.props as { className?: string }
+        return cloneElement(child as React.ReactElement<Record<string, unknown>>, {
+          id, 'aria-invalid': invalid, className: cn(props.className, invalid && 'border-risk-high'),
+        })
+      })}
+    </>
   )
 }
 
 /** Red banner used for 409 / 422 messages from the backend. */
 export function ErrorBanner({ message }: { message: string | null }) {
   if (!message) return null
-  return <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</div>
+  return <ErrorState title="That did not work" message={message} />
 }
 
 interface Props {
@@ -56,22 +87,24 @@ export default function FormModal({ title, submitLabel = 'Save', onClose, onSubm
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <form onSubmit={submit} className="max-h-full w-full max-w-lg space-y-4 overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <ErrorBanner message={error} />
-        <FieldErrors.Provider value={fieldErrors}>
-          <div className="space-y-3">{children}</div>
-        </FieldErrors.Provider>
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="rounded-md border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" disabled={busy} className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50">
-            {busy ? 'Saving…' : submitLabel}
-          </button>
-        </div>
-      </form>
-    </div>
+    <Dialog.Root open onOpenChange={(open) => !open && !busy && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-ink/40 data-[state=open]:animate-[fade-in_0.15s_ease-out]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-panel bg-surface p-6 shadow-2xl">
+          <form onSubmit={submit} className="space-y-4">
+            <Dialog.Title className="font-heading text-xl font-semibold text-ink">{title}</Dialog.Title>
+            <Dialog.Description className="sr-only">Fill in the fields and save. Fields marked with a star are required.</Dialog.Description>
+            <ErrorBanner message={error} />
+            <FieldErrors.Provider value={fieldErrors}>
+              <div className="space-y-3">{children}</div>
+            </FieldErrors.Provider>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button disabled={busy} onClick={onClose}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Saving…' : submitLabel}</Button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

@@ -4,7 +4,8 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
-import { ToastProvider } from './components/Toast'
+import { Toaster } from 'sonner'
+import { TooltipProvider } from './components/ui'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: false, refetchOnWindowFocus: false } },
@@ -13,11 +14,12 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
+      <TooltipProvider>
         <BrowserRouter>
           <App />
         </BrowserRouter>
-      </ToastProvider>
+        <Toaster position="bottom-right" richColors closeButton />
+      </TooltipProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

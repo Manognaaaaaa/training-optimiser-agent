@@ -1,71 +1,66 @@
 import type { ReactNode } from 'react'
 import type { FillBand } from '../api/sessions'
 import type { RiskLevel } from '../api/tracking'
-import { RISK_ICON, RISK_LABEL } from '../utils/tracking'
+import { RiskPill, Tag } from './ui'
+import { cn } from '../lib/cn'
 
-type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'violet' | 'indigo'
+type Tone = 'neutral' | 'good' | 'warn' | 'bad' | 'brand'
 
 const TONES: Record<Tone, string> = {
-  slate: 'bg-slate-100 text-slate-700',
-  green: 'bg-emerald-100 text-emerald-800',
-  amber: 'bg-amber-100 text-amber-800',
-  red: 'bg-red-100 text-red-800',
-  blue: 'bg-sky-100 text-sky-800',
-  violet: 'bg-violet-100 text-violet-800',
-  indigo: 'bg-indigo-100 text-indigo-800',
+  neutral: 'bg-risk-unknown-bg text-ink-muted',
+  good: 'bg-risk-ok-bg text-risk-ok',
+  warn: 'bg-risk-medium-bg text-risk-medium',
+  bad: 'bg-risk-high-bg text-risk-high',
+  brand: 'bg-primary-soft text-primary',
 }
 
-export function Badge({ tone = 'slate', children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONES[tone]}`}>{children}</span>
+/** Small pill. Colour is only used where it means something (good / warn / bad); everything else is neutral. */
+export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
+  return <span className={cn('inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium', TONES[tone])}>{children}</span>
 }
 
 const STATUS_TONE: Record<string, Tone> = {
-  scheduled: 'blue',
-  completed: 'green',
-  cancelled: 'slate',
-  booked: 'blue',
-  attended: 'green',
-  no_show: 'red',
+  scheduled: 'brand',
+  completed: 'good',
+  cancelled: 'neutral',
+  booked: 'brand',
+  attended: 'good',
+  no_show: 'bad',
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', booked: 'Booked', attended: 'Attended', no_show: 'No-show',
 }
 
 /** Session or enrollment status. */
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={STATUS_TONE[status] ?? 'slate'}>{status.replace('_', ' ')}</Badge>
+  return <Badge tone={STATUS_TONE[status] ?? 'neutral'}>{STATUS_LABEL[status] ?? status}</Badge>
 }
 
-const SHIFT_TONE: Record<string, Tone> = { day: 'amber', night: 'indigo', rotating: 'violet' }
-
+/** Shift is a plain fact, not a risk, so it is a neutral tag. */
 export function ShiftBadge({ shift }: { shift: string }) {
-  return <Badge tone={SHIFT_TONE[shift] ?? 'slate'}>{shift}</Badge>
+  return <Tag>{shift.charAt(0).toUpperCase() + shift.slice(1)}</Tag>
 }
 
-const BAND_TONE: Record<FillBand, Tone> = { low: 'red', medium: 'amber', high: 'green', cancelled: 'slate' }
+const BAND_TONE: Record<FillBand, Tone> = { low: 'warn', medium: 'brand', high: 'good', cancelled: 'neutral' }
+const BAND_LABEL: Record<FillBand, string> = { low: 'Low fill', medium: 'Medium fill', high: 'High fill', cancelled: 'Cancelled' }
 
-/** Fill band with the percentage, e.g. "low 33%". */
+/** Fill band with the percentage, e.g. "Low fill 33%". */
 export function FillBadge({ band, rate }: { band: FillBand; rate: number | null }) {
   return (
     <Badge tone={BAND_TONE[band]}>
-      {band}
+      {BAND_LABEL[band]}
       {rate !== null && ` ${Math.round(rate * 100)}%`}
     </Badge>
   )
 }
 
 export function ActiveBadge({ active }: { active: boolean }) {
-  return <Badge tone={active ? 'green' : 'slate'}>{active ? 'active' : 'inactive'}</Badge>
+  return <Badge tone={active ? 'good' : 'neutral'}>{active ? 'Active' : 'Inactive'}</Badge>
 }
 
-const RISK_TONE: Record<RiskLevel, Tone> = { high: 'red', medium: 'amber', low: 'green', achieved: 'blue', insufficient_data: 'slate' }
-
-/** Risk level: icon + text label + colour (never colour alone). Risk colours are used for nothing else. */
-export function RiskBadge({ level }: { level: RiskLevel }) {
-  return (
-    <Badge tone={RISK_TONE[level]}>
-      <span aria-hidden="true">{RISK_ICON[level]}</span> {RISK_LABEL[level]}
-    </Badge>
-  )
-}
+export const RiskBadge = ({ level }: { level: RiskLevel }) => <RiskPill level={level} />
 
 export function MandatoryBadge({ mandatory }: { mandatory: boolean }) {
-  return <Badge tone={mandatory ? 'indigo' : 'slate'}>{mandatory ? 'Mandatory' : 'Optional'}</Badge>
+  return <Tag>{mandatory ? 'Mandatory' : 'Optional'}</Tag>
 }

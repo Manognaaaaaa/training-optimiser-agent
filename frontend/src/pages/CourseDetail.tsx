@@ -1,55 +1,50 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { getCourseDetail, type Reason } from '../api/tracking'
-import { Badge, FillBadge, MandatoryBadge, RiskBadge } from '../components/Badge'
+import { useParams } from 'react-router-dom'
+import { getCourseDetail, type Reason, type UpcomingSession } from '../api/tracking'
 import CourseChart from '../components/charts/CourseChart'
 import ForecastHistory from '../components/charts/ForecastHistory'
 import GroupBars from '../components/charts/GroupBars'
 import WeeklyBars from '../components/charts/WeeklyBars'
 import PlannerPanel from '../components/PlannerPanel'
 import SessionDrawer from '../components/SessionDrawer'
-import { fmtDateTime } from '../utils/datetime'
-import { SHORTFALL_LABEL, fmtProb, fmtRange, shortfallSentence } from '../utils/tracking'
+import { DataTable, EmptyState, ErrorState, InfoTip, PageHeader, Panel, ProgressBar, RiskPill, Skeleton, Tag } from '../components/ui'
+import type { GlossaryTerm } from '../lib/glossary'
+import {
+  PROBLEM_LABEL, courseSummary, fmtChance, fmtDateTime, fmtNumber, scheduleDelta, shortByText,
+} from '../lib/format'
+import { cn } from '../lib/cn'
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, term, tone }: { label: string; value: string; term?: GlossaryTerm; tone?: 'good' | 'bad' }) {
   return (
-    <div>
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="text-lg font-semibold text-slate-900">{value}</div>
+    <div className="flex items-baseline justify-between gap-3 border-b border-line py-2 last:border-0">
+      <dt className="flex items-center gap-1.5 text-ink-muted">
+        {label}
+        {term && <InfoTip term={term} />}
+      </dt>
+      <dd className={cn('text-right font-medium text-ink', tone === 'good' && 'text-risk-ok', tone === 'bad' && 'text-risk-high')}>{value}</dd>
     </div>
   )
 }
 
 function ReasonsPanel({ reasons }: { reasons: Reason[] }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-900">Why this course is at risk</h3>
+    <Panel title="Why this course is at risk">
       {reasons.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-500">No risk reasons: the course is on track, achieved, or does not have enough data yet.</p>
+        <p className="text-sm text-ink-muted">No risk reasons: the course is on track, the target is met, or there is not enough data yet.</p>
       ) : (
-        <ol className="mt-2 divide-y divide-slate-100">
+        <ol className="divide-y divide-line">
           {reasons.map((r, i) => (
-            <li key={r.code} className="flex items-start justify-between gap-4 py-2">
-              <div>
-                <div className="text-sm text-slate-900">
-                  {i + 1}. {r.message}
-                </div>
-                <div className="text-xs text-slate-500">{r.code.replace(/_/g, ' ')}</div>
-              </div>
-              <div className="shrink-0 text-right text-xs text-slate-500">
-                <div>
-                  value <span className="font-medium text-slate-900">{Number(r.value.toFixed(1))}</span>
-                </div>
-                <div>
-                  benchmark <span className="font-medium text-slate-900">{Number(r.benchmark.toFixed(1))}</span>
-                </div>
-              </div>
+            <li key={r.code} className="flex items-start justify-between gap-4 py-2 first:pt-0 last:pb-0">
+              <span className="text-sm text-ink">{i + 1}. {r.message}</span>
+              <span className="shrink-0 text-right text-xs text-ink-muted">
+                now {Number(r.value.toFixed(1))}, expected {Number(r.benchmark.toFixed(1))}
+              </span>
             </li>
           ))}
         </ol>
       )}
-    </section>
+    </Panel>
   )
 }
 
@@ -59,88 +54,100 @@ export default function CourseDetail() {
   const [sessionId, setSessionId] = useState<number | null>(null)
   const detail = useQuery({ queryKey: ['tracking', 'course', courseId], queryFn: () => getCourseDetail(courseId), enabled: Number.isFinite(courseId) })
 
-  if (detail.isPending) return <div className="text-sm text-slate-500">Loading…</div>
-  if (detail.isError) {
+  if (detail.isPending) {
     return (
-      <div className="space-y-3">
-        <Link to="/" className="text-sm text-slate-600 underline">← Dashboard</Link>
-        <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{detail.error.message}</div>
+      <div className="space-y-6" aria-busy="true">
+        <Skeleton className="h-10 w-1/2" />
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton className="h-80 w-full" />
       </div>
     )
   }
+  if (detail.isError) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Course" breadcrumb={[{ label: 'Dashboard', to: '/' }, { label: 'Course' }]} />
+        <ErrorState title="This course could not load" message={detail.error.message} onRetry={() => void detail.refetch()} />
+      </div>
+    )
+  }
+
   const d = detail.data
   const c = d.course
+  const delta = scheduleDelta(c.pace_gap)
+
+  const sessionColumns = [
+    { key: 'start', header: 'When', cell: (s: UpcomingSession) => fmtDateTime(s.start_time), sortValue: (s: UpcomingSession) => s.start_time },
+    { key: 'seats', header: 'Seats taken', cell: (s: UpcomingSession) => `${s.booked} of ${s.capacity}`, sortValue: (s: UpcomingSession) => s.booked },
+    {
+      key: 'fill', header: 'How full',
+      cell: (s: UpcomingSession) => (
+        <div className="flex w-44 items-center gap-2">
+          <ProgressBar className="flex-1" value={s.booked} max={s.capacity} label="Seats taken" barClassName={s.fill_band === 'low' ? 'bg-risk-medium' : undefined} />
+          <span className="w-9 text-right text-xs text-ink-muted">{s.fill_rate === null ? '' : `${Math.round(s.fill_rate * 100)}%`}</span>
+        </div>
+      ),
+      sortValue: (s: UpcomingSession) => s.fill_rate ?? 0,
+    },
+  ]
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link to="/" className="text-sm text-slate-600 underline">← Dashboard</Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold text-slate-900">{c.name}</h1>
-          <span className="text-sm text-slate-400">{c.code}</span>
-          <MandatoryBadge mandatory={c.is_mandatory} />
-          <RiskBadge level={c.risk_level} />
-          {c.shortfall_type !== 'none' && <Badge>{SHORTFALL_LABEL[c.shortfall_type]} gap</Badge>}
+      <PageHeader
+        title={c.name}
+        breadcrumb={[{ label: 'Dashboard', to: '/' }, { label: c.name }]}
+        lead={courseSummary(c)}
+      />
+      <div className="-mt-3 flex flex-wrap items-center gap-2">
+        <RiskPill level={c.risk_level} />
+        <Tag>{c.is_mandatory ? 'Mandatory' : 'Optional'}</Tag>
+        <span className="text-xs text-ink-muted">{c.code}</span>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="min-w-0 space-y-6">
+          <CourseChart series={d.series} target={c.target} events={d.events} />
+          <ReasonsPanel reasons={c.reasons} />
+          <PlannerPanel courseId={courseId} />
         </div>
-        <p className="mt-2 max-w-3xl text-sm text-slate-700">{shortfallSentence(c)}</p>
+
+        <aside className="space-y-6">
+          <Panel title="Key facts">
+            <dl className="text-sm">
+              <Fact label="Done so far" value={`${fmtNumber(c.attended)} of ${fmtNumber(c.target)}`} />
+              <Fact label="Vs schedule" term="vs_schedule" value={delta.text} tone={delta.tone === 'neutral' ? undefined : delta.tone} />
+              <Fact label="Chance of hitting target" term="chance" value={fmtChance(c.p_hit)} />
+              <Fact label="Shortfall" term="shortfall" value={shortByText(c)} />
+              <Fact label="Problem" term="problem" value={PROBLEM_LABEL[c.shortfall_type]} />
+              <Fact label="Seats left" term="seats_left" value={`${fmtNumber(c.remaining_seats)} in ${c.remaining_sessions} sessions`} />
+              <Fact label="Show-up rate" term="show_rate" value={`${Math.round(c.p_show * 100)}%`} />
+              <Fact label="Eligible drivers" term="eligible_pool" value={fmtNumber(c.eligible_pool)} />
+            </dl>
+          </Panel>
+        </aside>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-3 xl:grid-cols-6">
-        <Stat label="Attended / target" value={`${c.attended} / ${c.target}`} />
-        <Stat label="Projected (90%)" value={fmtRange(c)} />
-        <Stat label="P(hit target)" value={fmtProb(c.p_hit)} />
-        <Stat label="Show-up rate" value={`${Math.round(c.p_show * 100)}%`} />
-        <Stat label="Seats left" value={`${c.remaining_seats} in ${c.remaining_sessions} sessions`} />
-        <Stat label="Eligible drivers" value={String(c.eligible_pool)} />
-      </div>
-
-      <CourseChart series={d.series} target={c.target} events={d.events} />
-      <ReasonsPanel reasons={c.reasons} />
-      <PlannerPanel courseId={courseId} />
+      <section className="space-y-2">
+        <h2 className="font-heading text-xl font-semibold">Upcoming sessions</h2>
+        <DataTable
+          caption="Upcoming sessions for this course"
+          columns={sessionColumns}
+          rows={d.upcoming_sessions}
+          rowKey={(s) => s.id}
+          onRowClick={(s) => setSessionId(s.id)}
+          initialSort={{ key: 'start', dir: 'asc' }}
+          empty={<EmptyState title="No sessions left">There are no sessions left on the calendar for this course.</EmptyState>}
+        />
+      </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <GroupBars title="Who is behind: by shift" rows={d.breakdown.shift} />
         <GroupBars title="Who is behind: by nationality" rows={d.breakdown.nationality} />
       </div>
-
       <div className="grid gap-4 xl:grid-cols-2">
         <ForecastHistory snapshots={d.snapshots} target={c.target} events={d.events} />
         <WeeklyBars weeks={d.weekly} />
       </div>
-
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Upcoming sessions</h2>
-        {d.upcoming_sessions.length === 0 ? (
-          <p className="text-sm text-slate-500">No sessions left on the calendar for this course.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  {['Start', 'Booked / capacity', 'Fill'].map((h) => (
-                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {d.upcoming_sessions.map((s) => (
-                  <tr key={s.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSessionId(s.id)}>
-                    <td className="px-3 py-2">{fmtDateTime(s.start_time)}</td>
-                    <td className="px-3 py-2">
-                      {s.booked} / {s.capacity}
-                    </td>
-                    <td className="px-3 py-2">
-                      <FillBadge band={s.fill_band} rate={s.fill_rate} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
 
       {sessionId !== null && <SessionDrawer sessionId={sessionId} onClose={() => setSessionId(null)} />}
     </div>

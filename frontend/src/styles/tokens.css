@@ -1,0 +1,139 @@
+/* Design tokens. Tailwind v4 reads @theme and turns each variable into utilities (bg-canvas, text-ink, rounded-panel ...). */
+@theme {
+  --color-ink: #17212b;
+  --color-ink-muted: #5b6875;
+  --color-canvas: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-line: #dde2e8;
+  --color-primary: #0f5e6b;
+  --color-primary-hover: #0b4b56;
+  --color-primary-soft: #e3f0f2;
+  /* Road-sign yellow: ONLY the simulated clock and the "today" marker on charts and the calendar. */
+  --color-signal: #f2b705;
+
+  /* The only reds, ambers and greens in the app. Each has a text colour and a soft background. */
+  --color-risk-high: #b42318;
+  --color-risk-high-bg: #fdecea;
+  --color-risk-medium: #b54708;
+  --color-risk-medium-bg: #fef3e2;
+  --color-risk-ok: #157f3d;
+  --color-risk-ok-bg: #e8f5ec;
+  --color-risk-unknown: #5b6875;
+  --color-risk-unknown-bg: #eef1f4;
+
+  --font-heading: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Type scale: 13 / 14 / 16 / 20 / 24 / 32 */
+  --text-xs: 0.8125rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+
+  /* Older pages still use Tailwind's slate / red / green / amber classes. Re-pointing those palettes at our tokens
+     restyles them until each page is rebuilt with the ui components. */
+  --color-slate-50: #f4f6f8;
+  --color-slate-100: #eef1f4;
+  --color-slate-200: #dde2e8;
+  --color-slate-300: #c9d0d8;
+  --color-slate-400: #9aa5b1;
+  --color-slate-500: #5b6875;
+  --color-slate-600: #4a5663;
+  --color-slate-700: #2f3b47;
+  --color-slate-800: #212c37;
+  --color-slate-900: #17212b;
+  --color-red-50: #fdecea;
+  --color-red-100: #fdecea;
+  --color-red-200: #f3b8b2;
+  --color-red-300: #e8928a;
+  --color-red-600: #b42318;
+  --color-red-700: #b42318;
+  --color-red-800: #8f1c13;
+  --color-emerald-50: #e8f5ec;
+  --color-emerald-100: #e8f5ec;
+  --color-emerald-200: #b7dec3;
+  --color-emerald-600: #157f3d;
+  --color-emerald-700: #157f3d;
+  --color-emerald-800: #0f6130;
+  --color-green-500: #157f3d;
+  --color-green-700: #157f3d;
+  --color-amber-50: #fef3e2;
+  --color-amber-100: #fef3e2;
+  --color-amber-200: #f5d49a;
+  --color-amber-700: #b54708;
+  --color-amber-800: #8c3706;
+  --color-sky-100: #e3f0f2;
+  --color-sky-800: #0f5e6b;
+  --color-violet-100: #eef1f4;
+  --color-violet-800: #2f3b47;
+  --color-indigo-100: #eef1f4;
+  --color-indigo-800: #2f3b47;
+
+  --radius-control: 6px;
+  --radius-panel: 10px;
+}
+
+@layer base {
+  html {
+    background: var(--color-canvas);
+  }
+  body {
+    font-family: var(--font-body);
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    font-size: 0.875rem;
+    /* All numbers line up in columns. */
+    font-variant-numeric: tabular-nums;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    letter-spacing: 0.005em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Motion only in response to a user action (drawer open, toast). */
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes skeleton {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
