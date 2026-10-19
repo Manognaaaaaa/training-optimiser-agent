@@ -33,6 +33,10 @@ Not in this phase: scoring and ranking, fairness penalties, LLM alert text, appr
 3. Malformed tool arguments: an error message goes back to the model and the loop continues (it costs a step). If the model answers in plain text instead of calling a tool, the first reply is searched for a JSON object once; later text replies get a nudge to call `submit_plan`.
 4. The server overwrites `course_id` and `alert_id` with the alert's values (a note goes in the trace if the model used different ones), then `parse_plan` + `check_plan`.
 
+### Format repair
+
+If `submit_plan` carries a plan that does not parse (a missing field, `new:N` instead of `new:1`), the server sends the exact error back **once** and lets the model fix it. A second unreadable plan is stored as `schema_invalid`. This matters for small local models; the prompt also carries a concrete example plan. A rule violation is never repaired: it is stored as `invalid`.
+
 ### Outcomes
 
 `valid`, `invalid` (checker violations), `schema_invalid` (does not parse), `no_plan` (`submit_no_plan`), `step_limit` (never submitted), and `llm_error` (the LLM failed after retries: the run is marked `failed`, plans already stored are kept, no row is written for that sample).

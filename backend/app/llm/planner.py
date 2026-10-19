@@ -28,6 +28,7 @@ from app.services.constraints import CATEGORY, check_plan
 from app.services.sim_clock import get_sim_now
 
 MAX_VALIDATE_CALLS = 1
+MAX_FORMAT_REPAIRS = 1  # a plan with a format mistake is sent back once, with the exact error, before it is rejected
 TOOLS_CHARS = len(json.dumps(TOOL_SPECS))  # the tool schemas are sent with every request too
 MAX_TOKENS_PER_STEP = 800  # Groq counts this reserve against the per-minute token limit
 PREFETCH_SESSIONS = 5
@@ -170,6 +171,7 @@ class SampleState:
     final_plan: dict | None = None  # raw plan the agent submitted
     no_plan_reason: str | None = None
     text_fallback_used: bool = False
+    n_repairs: int = 0
 
 
 def _force_ids(raw: dict, alert: Alert, state: SampleState | None = None) -> dict:
@@ -324,10 +326,20 @@ def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, tem
                     if raw is None:
                         result = {"error": "Missing 'plan' argument."}
                     elif call.name == "submit_plan":
-                        state.final_plan = raw if isinstance(raw, dict) else {"actions": raw}
-                        entry["result"] = "submitted"
-                        state.trace.append(entry)
-                        return state
+                        candidate = raw if isinstance(raw, dict) else {"actions": raw}
+                        problem = parse_plan(_force_ids(candidate, alert))
+                        if isinstance(problem, Violation) and state.n_repairs < MAX_FORMAT_REPAIRS:
+                            # Small models often slip on the format (a missing field, "new:N" instead of "new:1").
+                            # Show the exact error and let the model fix it once. Not a rule violation, so nothing is hidden:
+                            # if the second try is also unreadable it is stored as schema_invalid.
+                            state.n_repairs += 1
+                            result = {"error": problem.message[:700] + " Fix this and call submit_plan again. Use real values, e.g. temp_ref \"new:1\"."}
+                            state.trace.append({"note": "plan had a format problem; sent back once for a fix"})
+                        else:
+                            state.final_plan = candidate
+                            entry["result"] = "submitted"
+                            state.trace.append(entry)
+                            return state
                     elif state.n_validate >= MAX_VALIDATE_CALLS:
                         result = {"error": f"validate_plan can be called at most {MAX_VALIDATE_CALLS} times. Call submit_plan now."}
                     else:

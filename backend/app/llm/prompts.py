@@ -42,11 +42,13 @@ def system_prompt() -> str:
     """Kept deliberately short: Groq's free tier allows few tokens per minute and every step re-sends this text."""
     return """You plan driver-training changes for a course that is at risk of missing its annual target. Return ONE plan built only from real data.
 
-Plan JSON: {"course_id":int,"rationale":str,"actions":[...]} where each action is one of
-{"type":"enroll_driver","driver_id":int,"session_id":int|"new:N"}
-{"type":"move_driver","driver_id":int,"from_session_id":int,"to_session_id":int|"new:N"}
-{"type":"add_session","temp_ref":"new:N","course_id":int,"trainer_id":int,"start":"YYYY-MM-DDTHH:MM:00","end":"YYYY-MM-DDTHH:MM:00","location":str,"capacity":int}
-Create a new session (add_session) before any action that uses its temp_ref.
+Plan JSON, every field is required. Example with one new session and two bookings:
+{"course_id":3,"rationale":"Adds a session and fills a free seat.","actions":[
+{"type":"add_session","temp_ref":"new:1","course_id":3,"trainer_id":2,"start":"2026-04-05T09:00:00","end":"2026-04-05T13:00:00","location":"Training Room","capacity":10},
+{"type":"enroll_driver","driver_id":17,"session_id":"new:1"},
+{"type":"enroll_driver","driver_id":18,"session_id":5}]}
+Other action: {"type":"move_driver","driver_id":18,"from_session_id":5,"to_session_id":"new:1"}.
+temp_ref is literally new:1, then new:2 and so on (a number, never the letter N). add_session comes before any action that uses its temp_ref, and needs all 8 fields including course_id.
 
 Rules (a checker rejects any violation): never exceed session capacity (new sessions: at most the course default); only active drivers who are available, off shift, not yet trained in this course this year and not already booked for it; one session per driver per day with 12h rest; trainers cannot overlap or exceed their weekly limit; no past sessions; new sessions run Sunday-Thursday starting 09:00, 14:00 or 18:00.
 

@@ -76,7 +76,8 @@ def test_fabricated_session_and_trainer_are_found(adb):
 
 
 def test_schema_invalid_plan_is_stored(adb):
-    llm = FakeLLMClient([submit({"course_id": 1, "actions": "enrol everyone"})])
+    bad = submit({"course_id": 1, "actions": "enrol everyone"})
+    llm = FakeLLMClient([bad, bad])  # the first attempt is sent back for a fix; the second is also unreadable
     run = run_planner(adb, ALERT_ID, 1, llm)
     (row,) = plans_of(adb, run)
     assert row.outcome == "schema_invalid" and run.n_schema_invalid == 1
@@ -225,7 +226,8 @@ def test_planner_never_changes_sessions_or_enrollments(adb):
 
 def test_audit_trail(adb):
     plan = good_plan(adb)
-    llm = FakeLLMClient([submit(plan), submit({"course_id": 1, "actions": "bad"}), tool_response("submit_no_plan", {"reason": "none"})])
+    bad = submit({"course_id": 1, "actions": "bad"})
+    llm = FakeLLMClient([submit(plan), bad, bad, tool_response("submit_no_plan", {"reason": "none"})])
     run = run_planner(adb, ALERT_ID, 3, llm)
     rows = list(adb.scalars(select(AuditLog).order_by(AuditLog.id)))
     by_action = {}
@@ -299,3 +301,20 @@ def test_provider_rejecting_a_tool_call_is_retried_not_fatal(adb):
 def test_other_bad_requests_still_fail_the_run(adb):
     run = run_planner(adb, ALERT_ID, 1, FakeLLMClient([LLMError("bad_request", "model does not exist")]))
     assert run.status == "failed" and run.error.startswith("bad_request")
+
+
+def test_a_format_mistake_is_sent_back_once_and_can_be_fixed(adb):
+    plan = good_plan(adb)
+    broken = {"course_id": plan["course_id"], "actions": [{"type": "add_session", "temp_ref": "new:N"}]}
+    llm = FakeLLMClient([submit(broken), submit(plan)])
+    run = run_planner(adb, ALERT_ID, 1, llm)
+    (row,) = plans_of(adb, run)
+    assert row.outcome == "valid" and row.n_steps == 2 and run.n_schema_invalid == 0
+    feedback = llm.requests[1]["messages"][-1]["content"]
+    assert "does not match the required format" in feedback and "submit_plan again" in feedback
+    assert any("sent back once" in t.get("note", "") for t in row.trace)
+
+
+def test_the_prompt_shows_a_concrete_example_and_never_the_letter_n():
+    text = prompts.system_prompt()
+    assert '"temp_ref":"new:1"' in text and '"new:N"' not in text and "never the letter N" in text
