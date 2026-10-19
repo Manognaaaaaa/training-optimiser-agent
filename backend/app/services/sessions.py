@@ -137,7 +137,9 @@ def list_sessions(
     if start_to is not None:
         stmt = stmt.where(TrainingSession.start_time <= start_to)
     rows, total = paginate(db, stmt, params, sortable, "start_time", TrainingSession.id)
-    return [_row_to_dict(r, now) for r in rows], total
+    items = [_row_to_dict(r, now) for r in rows]
+    _attach_calendar(db, items)
+    return items, total
 
 
 def get_session_out(db: Session, session_id: int) -> dict:
@@ -146,7 +148,24 @@ def get_session_out(db: Session, session_id: int) -> dict:
     row = db.execute(stmt.where(TrainingSession.id == session_id)).first()
     if row is None:
         raise NotFound(f"Session {session_id} not found")
-    return _row_to_dict(row, now)
+    item = _row_to_dict(row, now)
+    _attach_calendar(db, [item])
+    return item
+
+
+def _queue_sync(db: Session, session_id: int, op: str = "upsert") -> None:
+    from app.calendar.sync import enqueue_if_linked
+
+    enqueue_if_linked(db, session_id, op)
+
+
+def _attach_calendar(db: Session, items: list[dict]) -> None:
+    """Add ``calendar: {status, html_link, last_synced_at}`` to each session dict (Google Calendar sync state)."""
+    from app.calendar.ops import calendar_info  # local import: the calendar package imports this module
+
+    info = calendar_info(db, [i["id"] for i in items])
+    for item in items:
+        item["calendar"] = info[item["id"]]
 
 
 def calendar_events(
@@ -177,7 +196,16 @@ def calendar_events(
             "booked": s["booked"], "attended": s["attended"],
             "fill_rate": s["fill_rate"], "fill_band": s["fill_band"],
         })
+    info = _calendar_info(db, [e["id"] for e in events])
+    for e in events:
+        e["calendar"] = info[e["id"]]
     return {"sim_now": now, "events": events}
+
+
+def _calendar_info(db: Session, ids: list[int]) -> dict[int, dict]:
+    from app.calendar.ops import calendar_info
+
+    return calendar_info(db, ids)
 
 
 # --- Light validation rules ----------------------------------------------------------------
@@ -318,6 +346,7 @@ def update_session(db: Session, session_id: int, data: SessionUpdate) -> dict:
     diff = apply_changes(session, changes)
     if diff:
         log_event(db, now, "user", "session_updated", "session", session.id, diff)
+        _queue_sync(db, session.id)
         db.commit()
     return get_session_out(db, session.id)
 
@@ -333,5 +362,6 @@ def cancel_session(db: Session, session_id: int) -> dict:
         cancelled += 1
     session.status = "cancelled"
     log_event(db, now, "user", "session_cancelled", "session", session.id, {"cancelled_bookings": cancelled})
+    _queue_sync(db, session.id, "cancel")
     db.commit()
     return get_session_out(db, session.id)

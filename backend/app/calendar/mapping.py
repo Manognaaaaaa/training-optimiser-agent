@@ -101,3 +101,20 @@ def build_event(session: TrainingSession, db: Session) -> dict:
     }
     body["extendedProperties"]["private"]["content_hash"] = content_hash(body)
     return body
+
+
+def normalize_remote(event: dict) -> dict:
+    """Keep only the fields we set, in the shape ``build_event`` produces, so a Google event can be re-hashed.
+
+    Google returns dateTime values with a UTC offset; we drop it because the timeZone field says the same thing.
+    """
+    def moment(value: dict) -> dict:
+        return {"dateTime": (value.get("dateTime") or "")[:19], "timeZone": value.get("timeZone", settings.calendar_timezone)}
+
+    out = {
+        "summary": event.get("summary", ""), "location": event.get("location", ""),
+        "description": event.get("description", ""), "start": moment(event.get("start", {})),
+        "end": moment(event.get("end", {})), "colorId": event.get("colorId", ""),
+        "extendedProperties": {"private": dict(event.get("extendedProperties", {}).get("private", {}))},
+    }
+    return out

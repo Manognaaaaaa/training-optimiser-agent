@@ -39,6 +39,11 @@ class FakeCalendarClient:
             self.events.pop((calendar_id, event_id), None)
             self.deleted.add((calendar_id, event_id))
 
+    def forget(self, calendar_id: str, event_id: str) -> None:
+        """Remove an event without a trace (updating it later gives NotFound, not Gone)."""
+        with self._lock:
+            self.events.pop((calendar_id, event_id), None)
+
     def put_raw(self, calendar_id: str, event_id: str, body: dict) -> None:
         """Add an event without going through insert (to set up orphans or foreign events)."""
         with self._lock:
@@ -76,6 +81,10 @@ class FakeCalendarClient:
             self._enter("update", calendar_id, event_id)
             current = self.events.get((calendar_id, event_id))
             if current is None:
+                if etag is None and (calendar_id, event_id) in self.deleted:  # Google restores a cancelled event
+                    self.deleted.discard((calendar_id, event_id))
+                    self.events[(calendar_id, event_id)] = self._stamp(calendar_id, event_id, body)
+                    return copy.deepcopy(self.events[(calendar_id, event_id)])
                 raise Gone(event_id) if (calendar_id, event_id) in self.deleted else NotFound(event_id)
             if etag is not None and etag != current["etag"]:
                 raise PreconditionFailed(event_id)

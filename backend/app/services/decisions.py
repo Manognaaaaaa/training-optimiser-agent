@@ -214,6 +214,9 @@ def approve_plan(db: Session, plan_id: int, actor_trainer_id: int | None) -> dic
     except Exception:
         db.rollback()  # the whole plan or nothing
         raise
+    from app.calendar.sync import sync_service
+
+    sync_service.kick()  # wake the calendar worker so Google sees the change within seconds
     return {**approval_result(db, plan), "already_approved": False}
 
 
