@@ -47,7 +47,7 @@ def test_happy_path_is_valid(adb):
     assert run.status == "done" and run.n_valid == 1
     assert row.outcome == "valid" and row.is_valid and row.rejection_reasons == []
     assert row.rationale == "Fill free seats." and row.n_steps == 2 and row.fabricated_ids == [] and row.checker_caught is None
-    assert row.status == "proposed" and row.score is None and row.rank is None and row.plan_hash
+    assert row.status == "valid" and row.rank == 1 and row.score == row.score_total and row.plan_hash
     assert run.total_tokens == 20 and run.prompt_version == prompts.PROMPT_VERSION and run.model == "fake"
     assert [t.get("tool") for t in row.trace if "tool" in t] == ["get_alert_context", "submit_plan"]
 

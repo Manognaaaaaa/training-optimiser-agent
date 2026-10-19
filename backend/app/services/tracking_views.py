@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Alert, AuditLog, Course, ForecastSnapshot
+from app.services.alert_pipeline import ACTIVE_STATUSES
 from app.services.errors import NotFound
 from app.services.forecasting import CourseForecast, course_cone
 from app.services.risk import RISK_ORDER
@@ -21,7 +22,7 @@ UPCOMING_LIMIT = 10
 
 def open_alert_ids(db: Session) -> dict[int, int]:
     """{course_id: id of its open alert} in one query."""
-    return {cid: aid for aid, cid in db.execute(select(Alert.id, Alert.course_id).where(Alert.status == "open"))}
+    return {cid: aid for aid, cid in db.execute(select(Alert.id, Alert.course_id).where(Alert.status.in_(ACTIVE_STATUSES)))}
 
 
 def course_row(fc: CourseForecast, alert_id: int | None) -> dict:

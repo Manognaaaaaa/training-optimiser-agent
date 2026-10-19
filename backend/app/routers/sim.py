@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends
+from collections.abc import Callable
+
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Course, Driver, Enrollment, TrainingSession, TrainingTarget
+from app.config import settings
+from app.llm import get_llm_client
+from app.llm.base import LLMError
+from app.models import Alert, Course, Driver, Enrollment, PlannerRun, TrainingSession, TrainingTarget
+from app.routers.planner import get_session_factory, queue_run
 from app.schemas.sim import (
     AdvanceRequest, AdvanceSummary, CourseProgress, ResetRequest, SimStateOut, SimTotals,
 )
@@ -62,10 +68,33 @@ def get_state(db: Session = Depends(get_db)):
 
 
 @router.post("/advance", response_model=AdvanceSummary)
-def advance_clock(body: AdvanceRequest, db: Session = Depends(get_db)):
+def advance_clock(
+    body: AdvanceRequest, background: BackgroundTasks, db: Session = Depends(get_db),
+    session_factory: Callable[[], Session] = Depends(get_session_factory),
+):
     """Play the simulation forward by ``days`` days (stops at year end)."""
     _block_while_planning(db)
-    return sim_engine.advance(db, body.days)
+    summary = sim_engine.advance(db, body.days)
+    if settings.auto_plan_on_high_risk:
+        _auto_plan(db, background, session_factory)
+    return summary
+
+
+def _auto_plan(db: Session, background: BackgroundTasks, session_factory: Callable[[], Session]) -> None:
+    """AUTO_PLAN_ON_HIGH_RISK: queue plan generation for one open high-risk alert that has never been planned.
+
+    Only one run can be active at a time, so the next alert is picked up after a later advance.
+    """
+    try:
+        llm = get_llm_client()
+    except LLMError:
+        return  # no key configured: skip quietly
+    planned = select(PlannerRun.alert_id)
+    alert = db.scalars(
+        select(Alert).where(Alert.status == "open", Alert.risk_level == "high", Alert.id.not_in(planned)).order_by(Alert.id)
+    ).first()
+    if alert is not None:
+        queue_run(db, alert, None, llm, background, session_factory)
 
 
 @router.post("/reset", response_model=SimStateOut)

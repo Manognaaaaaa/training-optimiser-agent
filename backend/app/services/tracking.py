@@ -61,19 +61,26 @@ def target_pace(target: int, t: datetime) -> float:
     return target * year_fraction(t)
 
 
-def eligible_pool(drivers: list["DriverFact"], completed_ids: set[int], now: datetime) -> int:
+def eligible_drivers(drivers: list["DriverFact"], completed_ids: set[int], now: datetime) -> list["DriverFact"]:
     """Drivers who could still complete a course this year.
 
     A driver is eligible if they are active now, or are a hire who starts later this year (inactive
     with a hire date after now and on or before SIM_END), and have not completed the course in SIM_YEAR.
-    No forecast may project more new completions than this number.
     """
-    count = 0
+    found = []
     for d in drivers:
         pending_hire = (not d.is_active) and now.date() < d.hire_date <= SIM_END.date()
         if (d.is_active or pending_hire) and d.id not in completed_ids:
-            count += 1
-    return count
+            found.append(d)
+    return found
+
+
+def eligible_pool(drivers: list["DriverFact"], completed_ids: set[int], now: datetime) -> int:
+    """How many drivers could still complete a course (see ``eligible_drivers``).
+
+    No forecast may project more new completions than this number.
+    """
+    return len(eligible_drivers(drivers, completed_ids, now))
 
 
 # --- Plain data loaded from the DB ------------------------------------------------------

@@ -132,9 +132,18 @@ def project(attended: int, target: int, pool: int, terms: list[SessionTerm], inf
     - 90% range = projection ± 1.645σ, clipped to [attended, attended + pool];
     - P(hit) = 1 − Φ((target − attended − 0.5 − μ) / σ); with σ = 0 it is simply 0 or 1.
     """
+    return project_moments(attended, target, pool, sum(t.mean for t in terms), sum(t.variance for t in terms), inflation)
+
+
+def project_moments(
+    attended: int, target: int, pool: int, mu: float, variance: float, inflation: float | None = None,
+) -> Projection:
+    """Same as ``project`` but from the totals Σ n·q (``mu``) and Σ n·q·(1 − q) (``variance``).
+
+    The Phase 6 what-if uses this: applying a plan just adds or removes a few seats from those two totals.
+    """
     inflation = INFLATION if inflation is None else inflation
-    mu = sum(t.mean for t in terms)
-    sigma = math.sqrt(inflation * sum(t.variance for t in terms))
+    sigma = math.sqrt(inflation * max(0.0, variance))
     ceiling = attended + pool
     projected = min(attended + mu, ceiling)
     low = max(attended, projected - Z90 * sigma)

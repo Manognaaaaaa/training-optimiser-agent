@@ -17,6 +17,7 @@ from app.llm import get_llm_client
 from app.llm.base import LLMClient
 from app.llm.planner import active_run_exists, create_run, execute_run
 from app.models import Alert, Driver, Plan, PlannerRun, Trainer, TrainingSession
+from app.services.alert_pipeline import CAN_GENERATE, set_alert_status
 from app.services.errors import Conflict, Invalid, NotFound
 
 router = APIRouter(prefix="/planner", tags=["planner"])
@@ -119,6 +120,24 @@ def _run_in_background(run_id: int, llm: LLMClient, session_factory: Callable[[]
         execute_run(db, run_id, llm)
 
 
+def queue_run(
+    db: Session, alert: Alert, n: int | None, llm: LLMClient, background: BackgroundTasks,
+    session_factory: Callable[[], Session],
+) -> dict:
+    """Validate, mark the alert ``generating``, create the run and schedule it. Shared by /planner/runs and /alerts/{id}/generate."""
+    if alert.status not in CAN_GENERATE:
+        raise Conflict(f"Alert {alert.id} is {alert.status}; plans can only be generated for open alerts")
+    n = n if n is not None else settings.planner_default_n
+    if not 1 <= n <= settings.planner_max_n:
+        raise Invalid(f"n must be between 1 and {settings.planner_max_n}", {"n": "out of range"})
+    if active_run_exists(db):
+        raise Conflict("A planner run is already in progress")
+    set_alert_status(db, alert, "generating", "plan generation requested")
+    run = create_run(db, alert, n, getattr(llm, "model", None) or settings.groq_model)  # commits
+    background.add_task(_run_in_background, run.id, llm, session_factory)
+    return run_to_dict(db, run)
+
+
 @router.post("/runs", status_code=202)
 def start_run(
     body: RunRequest,
@@ -131,16 +150,7 @@ def start_run(
     alert = db.get(Alert, body.alert_id)
     if alert is None:
         raise NotFound(f"Alert {body.alert_id} not found")
-    if alert.status != "open":
-        raise Conflict(f"Alert {alert.id} is {alert.status}; plans can only be generated for open alerts")
-    n = body.n if body.n is not None else settings.planner_default_n
-    if not 1 <= n <= settings.planner_max_n:
-        raise Invalid(f"n must be between 1 and {settings.planner_max_n}", {"n": "out of range"})
-    if active_run_exists(db):
-        raise Conflict("A planner run is already in progress")
-    run = create_run(db, alert, n, getattr(llm, "model", None) or settings.groq_model)
-    background.add_task(_run_in_background, run.id, llm, session_factory)
-    return run_to_dict(db, run)
+    return queue_run(db, alert, body.n, llm, background, session_factory)
 
 
 @router.get("/runs")

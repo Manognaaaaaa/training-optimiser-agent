@@ -5,7 +5,8 @@ Rules:
 - a course that becomes medium/high with no open alert gets one (``alert_opened``);
 - an open alert whose risk level changed is updated (``alert_escalated`` / ``alert_deescalated``);
 - an open alert whose course is back to low or achieved is resolved (``alert_auto_resolved``);
-- a dismissed alert is a user decision and is never touched, but if the course gets worse than it was
+- "open" here means any active alert (open, generating, plans_ready, no_valid_plans): its numbers are refreshed in place;
+- a dismissed or rejected alert is a user decision and is never touched, but if the course gets worse than it was
   when dismissed (medium → high) a new alert is opened;
 - the LLM message stays empty here (Phase 6 writes it).
 
@@ -19,7 +20,8 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Alert
+from app.models import Alert, Plan
+from app.services.alert_pipeline import ACTIVE_STATUSES, CLOSED_BY_USER
 from app.services.audit import log_event
 from app.services.forecasting import CourseForecast
 from app.services.risk import AT_RISK
@@ -80,13 +82,13 @@ def sync_alerts(db: Session, forecasts: list[CourseForecast], now: datetime) -> 
 
     for fc in forecasts:
         history = by_course.get(fc.course_id, [])
-        open_alert = next((a for a in reversed(history) if a.status == "open"), None)
+        open_alert = next((a for a in reversed(history) if a.status in ACTIVE_STATUSES), None)
         latest = history[-1] if history else None
 
         if open_alert is None:
             if fc.risk_level not in AT_RISK:
                 continue
-            if latest is not None and latest.status == "dismissed" and RANK[fc.risk_level] <= RANK[latest.risk_level]:
+            if latest is not None and latest.status in CLOSED_BY_USER and RANK[fc.risk_level] <= RANK[latest.risk_level]:
                 continue  # the user already said "not now"; only a worse level re-opens it
             alert = Alert(
                 course_id=fc.course_id, created_at=now, updated_at=now, risk_level=fc.risk_level,
@@ -102,6 +104,8 @@ def sync_alerts(db: Session, forecasts: list[CourseForecast], now: datetime) -> 
         if fc.risk_level in ("low", "achieved"):
             open_alert.status = "resolved"
             open_alert.updated_at = now
+            for plan in db.scalars(select(Plan).where(Plan.alert_id == open_alert.id, Plan.status == "valid")):
+                plan.status = "expired"  # the course recovered by itself, so the plans are no longer needed
             open_alert.projected_completions = round(fc.projected)
             open_alert.details = alert_details(fc, "auto_resolved", now, open_alert.risk_level)
             _audit(db, now, "alert_auto_resolved", open_alert, fc, {"previous_risk": open_alert.risk_level})

@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
@@ -21,7 +21,31 @@ class Settings(BaseSettings):
     planner_context_char_budget: int = 10000  # keep each request under this many characters (about 5,500 tokens)
     planner_sample_pause_seconds: float = 3  # pause between samples so Groq's per-minute limits can recover
 
+    # Ranking and alerts (Phase 6)
+    score_weight_closure: float = 0.35
+    score_weight_confidence: float = 0.20
+    score_weight_fairness: float = 0.20
+    score_weight_disruption: float = 0.15
+    score_weight_resource: float = 0.10
+    disruption_cap: float = 20  # drivers touched + 2 x sessions added that count as "maximum disruption"
+    trainer_hours_cap: float = 16  # added trainer hours that count as "maximum resource use"
+    top_k: int = 3  # plans shown as recommendations; the rest are collapsed
+    fairness_flag_burden: float = 0.6  # flag a group that takes more than this share of the burden...
+    fairness_flag_pool: float = 0.6  # ...while being under this share of the eligible pool
+    alert_writer_temperature: float = 0.2
+    auto_plan_on_high_risk: bool = False  # start plan generation for new high-risk alerts after the weekly close
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self):
+        total = (
+            self.score_weight_closure + self.score_weight_confidence + self.score_weight_fairness
+            + self.score_weight_disruption + self.score_weight_resource
+        )
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"score weights must sum to 1, got {total}")
+        return self
 
     @field_validator("groq_model", mode="before")
     @classmethod

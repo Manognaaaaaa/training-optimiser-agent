@@ -11,7 +11,7 @@ from app.database import Base, SessionLocal, engine
 from app.llm.base import LLMError
 from app.llm.planner import mark_stale_runs_failed
 from app.routers import (
-    alerts, calendar, constraints, courses, drivers, health, planner, sessions, sim, tracking, trainers,
+    alerts, calendar, constraints, courses, drivers, health, planner, plans, sessions, sim, tracking, trainers,
 )
 from app.services.errors import ApiError
 
@@ -41,7 +41,7 @@ app.add_middleware(
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError):
     """404 / 409 / 422 raised by services. The body always has a readable ``detail`` string."""
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "errors": exc.errors})
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "errors": exc.errors, **exc.extra})
 
 
 @app.exception_handler(LLMError)
@@ -66,6 +66,6 @@ app.include_router(health.router, prefix="/api")
 app.include_router(sim.router, prefix="/api")
 for _router in (
     drivers.router, trainers.router, courses.router, sessions.router, calendar.router, tracking.router, alerts.router,
-    constraints.router, planner.router,
+    constraints.router, planner.router, plans.router,
 ):
     app.include_router(_router, prefix="/api")

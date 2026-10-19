@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -17,7 +17,8 @@ class Alert(Base):
     projected_completions: Mapped[int] = mapped_column(Integer)
     target_completions: Mapped[int] = mapped_column(Integer)
     message: Mapped[str | None] = mapped_column(Text, default=None)  # LLM-written text
-    status: Mapped[str] = mapped_column(String(20), default="open")  # open / resolved / dismissed
+    # open -> generating -> plans_ready | no_valid_plans -> approved | rejected | dismissed; also resolved / expired / superseded
+    status: Mapped[str] = mapped_column(String(20), default="open")
     # Phase 3: why the course is at risk. details = {p_hit, low, high, reasons: [...], last_change, ...}
     shortfall_type: Mapped[str | None] = mapped_column(String(20), default=None)  # capacity_gap / attendance_gap / pool_gap
     details: Mapped[Any] = mapped_column(JSON, default=dict)
@@ -80,9 +81,14 @@ class Plan(Base):
     actions: Mapped[Any] = mapped_column(JSON)  # list of structured actions proposed by the agent
     is_valid: Mapped[bool] = mapped_column(Boolean, default=False)
     rejection_reasons: Mapped[Any] = mapped_column(JSON, default=list)  # final checker violations, as dicts
-    score: Mapped[float | None] = mapped_column(Float, default=None)  # Phase 6
-    rank: Mapped[int | None] = mapped_column(Integer, default=None)  # Phase 6
-    status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed / approved / rejected
+    score: Mapped[float | None] = mapped_column(Float, default=None)  # same number as score_total
+    rank: Mapped[int | None] = mapped_column(Integer, default=None)  # 1 = best; None for plans that were not ranked
+    # invalid / valid / approved / rejected / superseded / stale / expired
+    status: Mapped[str] = mapped_column(String(20), default="invalid")
+    # Phase 6: ranking
+    score_total: Mapped[float | None] = mapped_column(Float, default=None)
+    score_breakdown: Mapped[Any] = mapped_column(JSON, default=dict)
+    scoring_version: Mapped[str | None] = mapped_column(String(20), default=None)
     # Phase 5
     run_id: Mapped[int | None] = mapped_column(ForeignKey("planner_runs.id"), default=None)
     sample_index: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -122,3 +128,52 @@ class SimState(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     current_time: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AlertMessage(Base):
+    """One attempt by the LLM (or the fallback template) to write the trainer-facing text for an alert."""
+
+    __tablename__ = "alert_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id"))
+    planner_run_id: Mapped[int | None] = mapped_column(ForeignKey("planner_runs.id"), default=None)
+    model: Mapped[str] = mapped_column(String(100), default="")
+    prompt_version: Mapped[str] = mapped_column(String(40), default="")
+    raw_output: Mapped[str] = mapped_column(Text, default="")
+    parsed: Mapped[Any] = mapped_column(JSON, default=dict)  # the message that was checked (empty if it could not be parsed)
+    grounding_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    grounding_issues: Mapped[Any] = mapped_column(JSON, default=list)  # [{field, token, reason}]
+    used_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)  # this row's attempt number (1, 2, then the fallback row)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # simulated time
+
+
+class AlertDecision(Base):
+    """What a trainer decided about an alert or one of its plans."""
+
+    __tablename__ = "alert_decisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id"))
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), default=None)
+    decision: Mapped[str] = mapped_column(String(20))  # approve / reject_plan / reject_alert / dismiss
+    actor_trainer_id: Mapped[int | None] = mapped_column(ForeignKey("trainers.id"), default=None)
+    reason_code: Mapped[str | None] = mapped_column(String(40), default=None)
+    reason_text: Mapped[str | None] = mapped_column(Text, default=None)
+    sim_time: Mapped[datetime] = mapped_column(DateTime)
+    real_time: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class CalendarOutbox(Base):
+    """Changes an approved plan made, waiting for the Phase 7 Google Calendar sync."""
+
+    __tablename__ = "calendar_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"))
+    change_type: Mapped[str] = mapped_column(String(20))  # create_session / enroll_driver / move_driver
+    payload: Mapped[Any] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # simulated time

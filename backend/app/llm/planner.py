@@ -23,6 +23,7 @@ from app.llm.base import LLMClient, LLMError
 from app.llm.tools import TOOL_SPECS, run_read_only_tool
 from app.models import Alert, Course, Driver, Plan, PlannerRun, Trainer, TrainingSession
 from app.schemas.plan import Violation, parse_plan
+from app.services.alert_pipeline import CAN_GENERATE, finalize_run, restore_after_failed_run, set_alert_status
 from app.services.audit import log_event
 from app.services.constraints import CATEGORY, check_plan
 from app.services.sim_clock import get_sim_now
@@ -366,7 +367,7 @@ def build_plan_row(
 ) -> Plan:
     row = Plan(
         alert_id=alert.id, run_id=run.id, sample_index=index, temperature=temperature, strategy=strategy,
-        status="proposed", is_valid=False, actions=[], rejection_reasons=[], trace=state.trace,
+        status="invalid", is_valid=False, actions=[], rejection_reasons=[], trace=state.trace,
         draft_violations=state.draft_violations, n_steps=state.n_steps, n_validate_calls=state.n_validate,
         total_tokens=state.tokens, latency_ms=latency_ms, created_at=now, fabricated_ids=[],
     )
@@ -400,6 +401,8 @@ def build_plan_row(
         row.is_duplicate = True
     elif row.plan_hash:
         seen_hashes.add(row.plan_hash)
+    if row.outcome == "valid":
+        row.status = "superseded" if row.is_duplicate else "valid"  # a repeat of an earlier sample is never ranked
     return row
 
 
@@ -442,6 +445,8 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
     now = get_sim_now(db)  # read once; the API refuses to move the clock while a run is active
     started = time.monotonic()
     run.status, run.started_at = "running", now
+    if alert.status in CAN_GENERATE:
+        set_alert_status(db, alert, "generating", f"planner run {run.id} started")
     log_event(db, now, "system", "planner_run_started", "planner_run", run.id, {
         "alert_id": alert.id, "course_id": alert.course_id, "n": run.n_requested, "model": run.model,
         "prompt_version": run.prompt_version, "shortfall_type": alert.shortfall_type,
@@ -478,6 +483,7 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
         run.finished_at = now
         run.duration_ms = int((time.monotonic() - started) * 1000)
         log_event(db, now, "system", "planner_run_failed", "planner_run", run.id, {**_run_counts(run), "error_kind": kind})
+        restore_after_failed_run(db, db.get(Alert, run.alert_id), f"planner run {run.id} failed")
         db.commit()
         return run
 
@@ -485,6 +491,15 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
     run.duration_ms = int((time.monotonic() - started) * 1000)
     log_event(db, now, "system", "planner_run_finished", "planner_run", run.id, _run_counts(run))
     db.commit()
+    try:
+        finalize_run(db, run.id, llm)  # rank the valid plans, write the alert text, set the alert status
+    except Exception as err:  # a bug here must not leave the alert stuck in "generating"
+        db.rollback()
+        run = db.get(PlannerRun, run_id)
+        run.error = f"ranking failed: {err.__class__.__name__}: {err}"
+        restore_after_failed_run(db, db.get(Alert, run.alert_id), "ranking failed")
+        log_event(db, now, "system", "ranking_failed", "planner_run", run.id, {"error": run.error})
+        db.commit()
     return run
 
 

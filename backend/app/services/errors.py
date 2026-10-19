@@ -4,10 +4,11 @@
 class ApiError(Exception):
     status_code = 400
 
-    def __init__(self, detail: str, errors: dict[str, str] | None = None):
+    def __init__(self, detail: str, errors: dict[str, str] | None = None, extra: dict | None = None):
         super().__init__(detail)
         self.detail = detail
         self.errors = errors or {}  # optional {field: message} so forms can mark the bad field
+        self.extra = extra or {}  # optional extra JSON keys (for example the checker's violations)
 
 
 class NotFound(ApiError):
