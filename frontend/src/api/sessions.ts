@@ -1,3 +1,4 @@
+import type { CalendarInfo } from './calendarSync'
 import { apiFetch, json, qs, type ListParams, type Page } from './client'
 
 export type FillBand = 'low' | 'medium' | 'high' | 'cancelled'
@@ -21,6 +22,7 @@ export interface Session {
   fill_rate: number | null
   fill_band: FillBand
   is_editable: boolean
+  calendar?: CalendarInfo | null
 }
 
 export interface SessionCreateInput {
@@ -75,6 +77,7 @@ export interface CalendarEvent {
   attended: number
   fill_rate: number | null
   fill_band: FillBand
+  calendar?: CalendarInfo | null
 }
 
 export interface CalendarResponse {

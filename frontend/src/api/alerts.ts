@@ -1,3 +1,4 @@
+import type { CalendarInfo } from './calendarSync'
 import { apiFetch, json, qs } from './client'
 import type { PlannerRun } from './planner'
 import type { Reason, ShortfallType } from './tracking'
@@ -122,6 +123,8 @@ export interface AlertDetail {
   invalid: PlanView[]
   run: PlannerRun | null
   decisions: DecisionView[]
+  /** For an approved plan: the sessions it touched and their Google Calendar state. */
+  calendar: { plan_id: number; sessions: { session_id: number; start: string; end: string; status: string; calendar: CalendarInfo }[] } | null
 }
 
 export interface ApproveResult {

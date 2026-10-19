@@ -9,7 +9,7 @@ import { logAdvance } from '../../lib/simLog'
 export function useAdvance() {
   const queryClient = useQueryClient()
   const state = useQuery({ queryKey: ['sim', 'state'], queryFn: getSimState })
-  const runs = useQuery({ queryKey: ['planner', 'runs', 'all'], queryFn: () => listPlannerRuns(), refetchInterval: 3000 })
+  const runs = useQuery({ queryKey: ['planner', 'runs', 'all'], queryFn: () => listPlannerRuns() })
   const plannerBusy = runs.data?.some((r) => isRunActive(r)) ?? false
 
   const advance = useMutation({

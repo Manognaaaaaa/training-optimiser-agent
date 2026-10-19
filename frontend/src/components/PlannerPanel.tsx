@@ -133,8 +133,7 @@ export default function PlannerPanel({ courseId, renderPlanFooter }: { courseId:
   const runId = startedRunId ?? runs.data?.[0]?.id ?? null
   const run = useQuery({
     queryKey: ['planner', 'run', runId], queryFn: () => getPlannerRun(runId!), enabled: runId !== null,
-    refetchInterval: (query) => (isRunActive(query.state.data) ? 1500 : false),
-  })
+  }) // progress arrives as live events written into this cache entry, so there is no polling
   const start = useMutation({
     mutationFn: () => startPlannerRun(alertId!, n),
     onSuccess: (created) => {

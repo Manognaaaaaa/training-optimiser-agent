@@ -8,7 +8,9 @@ import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { getAlertCounts } from '../api/alerts'
 import ApiStatus from '../components/ApiStatus'
+import { LiveStatus } from '../components/shell/LiveStatus'
 import { SimClock } from '../components/shell/SimClock'
+import { useLiveEvents } from '../hooks/useLiveEvents'
 import { cn } from '../lib/cn'
 
 interface NavItem {
@@ -68,7 +70,7 @@ function breadcrumbFor(pathname: string, search: URLSearchParams): string[] {
 function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const location = useLocation()
   const search = new URLSearchParams(location.search)
-  const counts = useQuery({ queryKey: ['alerts', 'counts'], queryFn: getAlertCounts, refetchInterval: 10_000 })
+  const counts = useQuery({ queryKey: ['alerts', 'counts'], queryFn: getAlertCounts })
   const openAlerts = counts.data?.plans_ready ?? 0
 
   return (
@@ -126,6 +128,7 @@ function Brand({ collapsed }: { collapsed: boolean }) {
 }
 
 export default function AppLayout() {
+  useLiveEvents() // one live connection for the whole app
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -203,7 +206,8 @@ export default function AppLayout() {
           <div className="order-last w-full md:order-none md:w-auto">
             <SimClock />
           </div>
-          <div className="md:order-last">
+          <div className="flex items-center gap-3 md:order-last">
+            <LiveStatus />
             <ApiStatus />
           </div>
         </header>

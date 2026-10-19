@@ -9,6 +9,7 @@ import { useMemo, useRef, useState } from 'react'
 import { getCalendar, type CalendarEvent } from '../api/sessions'
 import { getSimState } from '../api/sim'
 import SessionDrawer from '../components/SessionDrawer'
+import { SyncIcon } from '../components/SyncBadge'
 import SessionFormModal from '../components/SessionFormModal'
 import { Button, ErrorState, PageHeader, SelectField, Skeleton } from '../components/ui'
 import { useAllCourses, useAllTrainers } from '../hooks/useLookups'
@@ -33,7 +34,10 @@ function eventContent(arg: EventContentArg) {
   const count = e.status === 'completed' ? e.attended : e.booked
   return (
     <div className="overflow-hidden px-1 text-xs leading-tight">
-      <div className="font-semibold">{e.course_code} {count}/{e.capacity}</div>
+      <div className="flex items-center justify-between gap-1 font-semibold">
+        <span>{e.course_code} {count}/{e.capacity}</span>
+        <SyncIcon info={e.calendar} />
+      </div>
       <div className="truncate opacity-80">{e.trainer_name}</div>
     </div>
   )

@@ -10,6 +10,7 @@ import { ApiError } from '../api/client'
 import { getSimState } from '../api/sim'
 import type { RiskLevel } from '../api/tracking'
 import PlanCard, { ViolationList } from '../components/alerts/PlanCard'
+import { SyncLine } from '../components/SyncBadge'
 import { useToast } from '../components/Toast'
 import { Button, ConfirmDialog, EmptyState, ErrorState, PageHeader, Panel, RiskPill, SelectField, Skeleton, Tag, TextAreaField } from '../components/ui'
 import { useAllTrainers } from '../hooks/useLookups'
@@ -143,7 +144,6 @@ function Detail({ alertId, simNow, actorId }: { alertId: number; simNow?: string
   const detail = useQuery({
     queryKey: ['alert', alertId],
     queryFn: () => getAlert(alertId),
-    refetchInterval: (q) => (q.state.data?.alert.status === 'generating' ? 2000 : false),
   })
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['alert'] })
@@ -196,7 +196,7 @@ function Detail({ alertId, simNow, actorId }: { alertId: number; simNow?: string
 
       {status === 'generating' && (
         <div role="status" className="rounded-panel bg-primary-soft px-4 py-3 text-sm text-ink">
-          <span className="font-medium">Making plans…</span> {run ? `${run.samples_done} of ${run.n_requested} done.` : ''} Each plan can take a few seconds to a few minutes. This page updates by itself.
+          <span className="font-medium">Making plans…</span> {run ? `${run.samples_done} of ${run.n_requested} done.` : ''} Each plan can take a few seconds to a few minutes. This page updates by itself, live.
         </div>
       )}
 
@@ -257,6 +257,19 @@ function Detail({ alertId, simNow, actorId }: { alertId: number; simNow?: string
         </details>
       )}
 
+      {d.calendar && (
+        <Panel title="Google Calendar">
+          <ul className="divide-y divide-line text-sm">
+            {d.calendar.sessions.map((x) => (
+              <li key={x.session_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span className="font-medium">Session {x.session_id} · {fmtDate(x.start)}</span>
+                <SyncLine info={x.calendar} />
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       {d.decisions.length > 0 && (
         <Panel title="Decisions so far">
           <ul className="space-y-2 text-sm text-ink">
@@ -303,7 +316,7 @@ export default function Alerts() {
   const [tabKey, setTabKey] = useState('ready')
   const [actor, setActor] = useActor()
   const trainers = useAllTrainers()
-  const alerts = useQuery({ queryKey: ['alerts', 'all'], queryFn: () => listAlerts(), refetchInterval: 5000 })
+  const alerts = useQuery({ queryKey: ['alerts', 'all'], queryFn: () => listAlerts() })
   const sim = useQuery({ queryKey: ['sim', 'state'], queryFn: getSimState })
 
   const all = useMemo(

@@ -158,8 +158,12 @@ def publish_after_commit(db: Session, type: str, payload: dict | None = None) ->
 
 def publish_alert(db: Session, alert, type: str) -> None:
     """Tell the UI (after the commit) that an alert was created or changed."""
+    from app.models import Course  # local import: models do not know about the bus
+
+    course = db.get(Course, alert.course_id)
     publish_after_commit(db, type, {
-        "alert_id": alert.id, "course_id": alert.course_id, "risk_level": alert.risk_level, "status": alert.status})
+        "alert_id": alert.id, "course_id": alert.course_id, "course_name": course.name if course else None,
+        "risk_level": alert.risk_level, "status": alert.status})
 
 
 @event.listens_for(Session, "after_commit")
