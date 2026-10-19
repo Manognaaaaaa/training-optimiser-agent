@@ -9,6 +9,8 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.live.bus import publish_after_commit
+
 from app.models import Driver, DriverUnavailability, Enrollment, TrainingSession
 from app.services.audit import log_event
 from app.services.errors import Conflict, get_or_404
@@ -145,6 +147,7 @@ def add_enrollment(db: Session, session_id: int, driver_id: int) -> dict:
         "session_id": session.id, "driver_id": driver.id, "employee_code": driver.employee_code,
     })
     _queue_sync(db, session.id)
+    publish_after_commit(db, "sessions.changed", {"session_ids": [session.id]})
     db.commit()
     return _out(enrollment, driver)
 
@@ -162,6 +165,7 @@ def cancel_enrollment(db: Session, session_id: int, enrollment_id: int) -> dict:
         "session_id": session_id, "driver_id": driver.id, "employee_code": driver.employee_code,
     })
     _queue_sync(db, session_id)
+    publish_after_commit(db, "sessions.changed", {"session_ids": [session_id]})
     db.commit()
     return _out(enrollment, driver)
 

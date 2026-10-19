@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.live.bus import publish_alert
 from app.llm.base import LLMClient
 from app.models import Alert, Plan, PlannerRun
 from app.services.alert_writer import write_alert_message
@@ -30,6 +31,7 @@ def set_alert_status(db: Session, alert: Alert, status: str, reason: str) -> Non
     previous, alert.status = alert.status, status
     log_event(db, get_sim_now(db), "system", "alert_status_changed", "alert", alert.id,
               {"from": previous, "to": status, "reason": reason})
+    publish_alert(db, alert, "alert.updated")
 
 
 def restore_after_failed_run(db: Session, alert: Alert, reason: str) -> None:

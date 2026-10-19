@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.live.bus import publish_after_commit
 from app.models import Alert, AlertDecision, CalendarOutbox, Enrollment, Plan, Trainer, TrainingSession
 from app.schemas.plan import AddSession, EnrollDriver, MoveDriver, Violation, parse_plan
 from app.services.alert_pipeline import ACTIVE_STATUSES, set_alert_status
@@ -70,6 +71,8 @@ def _record(db: Session, now: datetime, alert: Alert, plan: Plan | None, decisio
               "plan" if plan else "alert", plan.id if plan else alert.id,
               {"alert_id": alert.id, "plan_id": plan.id if plan else None, "actor_trainer_id": actor,
                "reason_code": code, "reason_text": text})
+    publish_after_commit(db, "plan.decided", {
+        "plan_id": plan.id if plan else None, "alert_id": alert.id, "decision": decision})
     return row
 
 
@@ -210,6 +213,7 @@ def approve_plan(db: Session, plan_id: int, actor_trainer_id: int | None) -> dic
         _record(db, now, alert, plan, "approve", actor, None, None)
         log_event(db, now, "system", "plan_applied", "plan", plan.id, {
             "alert_id": alert.id, "changes": [{"change_type": o.change_type, **o.payload} for o in outbox]})
+        publish_after_commit(db, "sessions.changed", {"session_ids": sorted({o.session_id for o in outbox if o.session_id})})
         db.commit()
     except Exception:
         db.rollback()  # the whole plan or nothing

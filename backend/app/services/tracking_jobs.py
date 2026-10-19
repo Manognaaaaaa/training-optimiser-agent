@@ -8,7 +8,8 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ForecastSnapshot
+from app.live.bus import publish_after_commit, publish_alert
+from app.models import Alert, ForecastSnapshot
 from app.services.alerts import AlertChanges, sync_alerts
 from app.services.forecasting import CourseForecast, fleet_rates, forecast_course
 from app.services.risk import assess
@@ -58,4 +59,9 @@ def weekly_close(db: Session) -> WeeklyCloseResult:
     snapshots = write_snapshots(db, forecasts, facts.now)
     changes = sync_alerts(db, forecasts, facts.now)
     db.flush()
+    publish_after_commit(db, "forecast.updated", {"course_ids": sorted(fc.course_id for fc in forecasts)})
+    for alert_id in changes.opened:
+        publish_alert(db, db.get(Alert, alert_id), "alert.created")
+    for alert_id in [*changes.escalated, *changes.deescalated, *changes.resolved]:
+        publish_alert(db, db.get(Alert, alert_id), "alert.updated")
     return WeeklyCloseResult(facts.now, snapshots, changes)

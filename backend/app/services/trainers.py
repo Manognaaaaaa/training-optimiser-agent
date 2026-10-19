@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.live.bus import publish_after_commit
+
 from app.models import Trainer, TrainingSession
 from app.schemas.trainers import TrainerCreate, TrainerUpdate
 from app.services.audit import apply_changes, log_event
@@ -60,6 +62,7 @@ def create_trainer(db: Session, data: TrainerCreate) -> dict:
     db.add(trainer)
     db.flush()
     log_event(db, now, "user", "trainer_created", "trainer", trainer.id, data.model_dump())
+    publish_after_commit(db, "master_data.changed", {"entity": "trainers"})
     db.commit()
     return get_trainer(db, trainer.id)
 
@@ -88,6 +91,7 @@ def update_trainer(db: Session, trainer_id: int, data: TrainerUpdate) -> dict:
     warnings: list[str] = []
     if diff:
         log_event(db, now, "user", "trainer_updated", "trainer", trainer.id, diff)
+        publish_after_commit(db, "master_data.changed", {"entity": "trainers"})
         db.commit()
         if "max_sessions_per_week" in diff:
             warnings = _overloaded_weeks(db, trainer, now)
@@ -107,4 +111,5 @@ def delete_trainer(db: Session, trainer_id: int) -> None:
         raise Conflict(f"{trainer.name} has {n} scheduled or completed sessions. Reassign them to another trainer first.")
     log_event(db, now, "user", "trainer_deleted", "trainer", trainer.id, {"name": trainer.name})
     db.delete(trainer)
+    publish_after_commit(db, "master_data.changed", {"entity": "trainers"})
     db.commit()

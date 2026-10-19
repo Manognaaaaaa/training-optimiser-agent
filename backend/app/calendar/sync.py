@@ -31,8 +31,14 @@ log = logging.getLogger(__name__)
 STUCK_AFTER = timedelta(minutes=2)
 BACKOFF_CAP_SECONDS = 60
 
-# Called after every change of a link's status: (session_id, status). Replaced by the live bus in app.live.
-on_update: Callable[[int, str], None] = lambda session_id, status: None
+def _publish_update(session_id: int, status: str) -> None:
+    from app.live.bus import bus
+
+    bus.publish("calendar.sync_updated", {"session_id": session_id, "status": status})
+
+
+# Called after the DB commit of every change of a session's sync status. Tests may replace it.
+on_update: Callable[[int, str], None] = _publish_update
 
 
 def utcnow() -> datetime:

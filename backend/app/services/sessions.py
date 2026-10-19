@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from app.live.bus import publish_after_commit
+
 from app.models import Course, Enrollment, Trainer, TrainingSession
 from app.schemas.sessions import SessionCreate, SessionUpdate
 from app.services.audit import apply_changes, log_event
@@ -298,6 +300,7 @@ def create_session(db: Session, data: SessionCreate) -> dict:
         "course": course.code, "trainer": trainer.name, "start_time": start.isoformat(),
         "end_time": end.isoformat(), "location": data.location, "capacity": capacity,
     })
+    publish_after_commit(db, "sessions.changed", {"session_ids": [session.id]})
     db.commit()
     return get_session_out(db, session.id)
 
@@ -347,6 +350,7 @@ def update_session(db: Session, session_id: int, data: SessionUpdate) -> dict:
     if diff:
         log_event(db, now, "user", "session_updated", "session", session.id, diff)
         _queue_sync(db, session.id)
+        publish_after_commit(db, "sessions.changed", {"session_ids": [session.id]})
         db.commit()
     return get_session_out(db, session.id)
 
@@ -363,5 +367,6 @@ def cancel_session(db: Session, session_id: int) -> dict:
     session.status = "cancelled"
     log_event(db, now, "user", "session_cancelled", "session", session.id, {"cancelled_bookings": cancelled})
     _queue_sync(db, session.id, "cancel")
+    publish_after_commit(db, "sessions.changed", {"session_ids": [session.id]})
     db.commit()
     return get_session_out(db, session.id)

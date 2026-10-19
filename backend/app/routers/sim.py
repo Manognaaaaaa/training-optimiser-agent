@@ -1,10 +1,15 @@
 import logging
 from collections.abc import Callable
 
+from typing import Literal
+
 from fastapi import APIRouter, BackgroundTasks, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.live.autoplay import MIN_INTERVAL_SECONDS, autoplay
+from app.live.bus import bus
 from app.database import get_db
 from app.config import settings
 from app.llm import get_llm_client
@@ -124,8 +129,28 @@ def reset(body: ResetRequest | None = None, db: Session = Depends(get_db)):
     engine = db.get_bind()
     db.close()  # release the connection before dropping tables
     reseed(engine, seed)
+    bus.publish("resync", {"reason": "database re-seeded"})
     with Session(engine) as fresh:
         return _build_state(fresh)
+
+
+class AutoplayRequest(BaseModel):
+    enabled: bool
+    step: Literal["day", "week"] = "day"
+    interval_seconds: float = Field(5, ge=MIN_INTERVAL_SECONDS, le=300)
+
+
+@router.get("/autoplay")
+def get_autoplay():
+    return autoplay.state()
+
+
+@router.post("/autoplay")
+async def set_autoplay(body: AutoplayRequest):
+    """Start or stop advancing the simulated clock on a timer."""
+    if body.enabled:
+        return await autoplay.start(body.step, body.interval_seconds)
+    return await autoplay.stop()
 
 
 @router.get("/progress", response_model=list[CourseProgress])

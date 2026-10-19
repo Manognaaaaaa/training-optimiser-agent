@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     calendar_sync_enabled: bool = True
     calendar_sync_interval_seconds: float = 5
     calendar_max_attempts: int = 5
+    live_heartbeat_seconds: float = 15  # SSE heartbeat period
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

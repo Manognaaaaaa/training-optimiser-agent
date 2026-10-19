@@ -5,6 +5,8 @@ from datetime import datetime
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.live.bus import publish_after_commit
+
 from app.models import Course, Driver, DriverUnavailability, Enrollment, TrainingSession
 from app.schemas.drivers import DriverCreate, DriverUpdate, UnavailabilityCreate
 from app.services.audit import apply_changes, log_event
@@ -78,6 +80,7 @@ def create_driver(db: Session, data: DriverCreate) -> Driver:
         "employee_code": code, "name": driver.name, "shift": driver.shift,
         "nationality": driver.nationality, "depot": driver.depot,
     })
+    publish_after_commit(db, "master_data.changed", {"entity": "drivers"})
     db.commit()
     return driver
 
@@ -93,6 +96,8 @@ def update_driver(db: Session, driver_id: int, data: DriverUpdate) -> Driver:
     diff = apply_changes(driver, changes)
     if diff:
         log_event(db, now, "user", "driver_updated", "driver", driver.id, diff)
+        publish_after_commit(db, "sessions.changed", {"session_ids": []})  # bookings may have been cancelled
+        publish_after_commit(db, "master_data.changed", {"entity": "drivers"})
         db.commit()
     return driver
 
@@ -128,6 +133,8 @@ def deactivate_driver(db: Session, driver_id: int) -> tuple[Driver, int]:
     cancelled = _cancel_bookings(db, driver.id, now)
     driver.is_active = False
     log_event(db, now, "user", "driver_deactivated", "driver", driver.id, {"cancelled_bookings": cancelled})
+    publish_after_commit(db, "sessions.changed", {"session_ids": []})  # bookings may have been cancelled
+    publish_after_commit(db, "master_data.changed", {"entity": "drivers"})
     db.commit()
     return driver, cancelled
 
@@ -188,6 +195,8 @@ def add_unavailability(db: Session, driver_id: int, data: UnavailabilityCreate) 
         "driver_id": driver_id, "start_time": data.start_time.isoformat(), "end_time": data.end_time.isoformat(),
         "reason": data.reason, "cancelled_bookings": cancelled,
     })
+    publish_after_commit(db, "sessions.changed", {"session_ids": []})  # bookings may have been cancelled
+    publish_after_commit(db, "master_data.changed", {"entity": "drivers"})
     db.commit()
     return block, cancelled
 
@@ -202,4 +211,5 @@ def remove_unavailability(db: Session, driver_id: int, uid: int) -> None:
         "end_time": block.end_time.isoformat(), "reason": block.reason,
     })
     db.delete(block)
+    publish_after_commit(db, "master_data.changed", {"entity": "drivers"})
     db.commit()

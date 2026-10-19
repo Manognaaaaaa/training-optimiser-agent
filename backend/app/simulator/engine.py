@@ -14,6 +14,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.live.bus import bus
 from app.models import AuditLog, Course, Driver, DriverUnavailability, Enrollment, Trainer, TrainingSession
 from app.schemas.sim import AdvanceSummary, DayBreakdown
 from app.services.audit import log_event
@@ -360,4 +361,16 @@ def advance(db: Session, days: int) -> AdvanceSummary:
     )
     log_event(db, now, "system", "sim_advanced", "sim_state", 1, summary.model_dump(mode="json"))
     db.commit()
+    if summary.days_advanced:
+        _publish_advance(db, start, now, summary)
     return summary
+
+
+def _publish_advance(db: Session, start: datetime, now: datetime, summary: AdvanceSummary) -> None:
+    """One set of live events per advance call (not per simulated day), published after the final commit."""
+    finished = list(db.scalars(select(TrainingSession.id).where(
+        TrainingSession.status == "completed", TrainingSession.end_time >= start, TrainingSession.end_time < now)))
+    bus.publish("sim.advanced", {"sim_time": now.isoformat(), "days_advanced": summary.days_advanced})
+    if summary.attended or summary.no_shows:
+        bus.publish("attendance.recorded", {"session_ids": finished[:200], "count": summary.attended + summary.no_shows})
+    bus.publish("sessions.changed", {"session_ids": finished[:200]})

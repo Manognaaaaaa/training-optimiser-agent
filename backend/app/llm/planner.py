@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.live.bus import bus, publish_after_commit
 from app.llm import prompts
 from app.llm.base import LLMClient, LLMError
 from app.llm.fix_hints import hint_for
@@ -546,6 +547,18 @@ def _maybe_prune(
     return row if row.outcome == "valid" else None
 
 
+# --- Live updates -----------------------------------------------------------------------------------------------------------
+def _publish_progress(db: Session, run: PlannerRun, samples_done: int) -> None:
+    publish_after_commit(db, "planner_run.progress", {
+        "run_id": run.id, "alert_id": run.alert_id, "samples_done": samples_done, "n": run.n_requested,
+        "status": run.status})
+
+
+def _publish_completed(run: PlannerRun) -> None:
+    bus.publish("planner_run.completed", {
+        "run_id": run.id, "alert_id": run.alert_id, "valid_count": run.n_valid, "status": run.status})
+
+
 # --- The whole run -------------------------------------------------------------------------------------------------------------
 def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
     """Run all samples of a queued run, one after another. Commits after every sample so the UI can show progress."""
@@ -560,6 +573,7 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
         "alert_id": alert.id, "course_id": alert.course_id, "n": run.n_requested, "model": run.model,
         "prompt_version": run.prompt_version, "shortfall_type": alert.shortfall_type,
     })
+    _publish_progress(db, run, 0)
     db.commit()
 
     seen_hashes: set[str] = set()
@@ -576,6 +590,7 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
             log_event(db, now, "system", "planner_run_infeasible", "planner_run", run.id, {"alert_id": alert.id, **run.infeasibility})
             db.commit()
             finalize_run(db, run.id, llm)
+            _publish_completed(run)
             return run
 
         ctx = build_context(db, alert, now)
@@ -618,6 +633,7 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
                     run.n_pruned += 1
                     _audit_plan(db, now, pruned)
             run.duration_ms = int((time.monotonic() - started) * 1000)
+            _publish_progress(db, run, len(llm_rows))
             db.commit()
     except Exception as err:  # LLMError, or a bug: either way the run must not stay "running" forever
         db.rollback()
@@ -631,6 +647,7 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
         log_event(db, now, "system", "planner_run_failed", "planner_run", run.id, {**_run_counts(run), "error_kind": kind})
         restore_after_failed_run(db, db.get(Alert, run.alert_id), f"planner run {run.id} failed")
         db.commit()
+        _publish_completed(run)
         return run
 
     run.status, run.finished_at = "done", now
@@ -646,6 +663,7 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
         restore_after_failed_run(db, db.get(Alert, run.alert_id), "ranking failed")
         log_event(db, now, "system", "ranking_failed", "planner_run", run.id, {"error": run.error})
         db.commit()
+    _publish_completed(run)
     return run
 
 

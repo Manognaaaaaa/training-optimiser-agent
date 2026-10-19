@@ -2,6 +2,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.live.bus import publish_after_commit
+
 from app.models import Course, TrainingSession, TrainingTarget
 from app.schemas.courses import CourseCreate, CourseUpdate
 from app.services.audit import apply_changes, log_event
@@ -67,6 +69,7 @@ def create_course(db: Session, data: CourseCreate) -> dict:
     if data.target_completions is not None:
         db.add(TrainingTarget(course_id=course.id, year=SIM_YEAR, target_completions=data.target_completions))
     log_event(db, now, "user", "course_created", "course", course.id, {**fields, "target_completions": data.target_completions})
+    publish_after_commit(db, "master_data.changed", {"entity": "courses"})
     db.commit()
     return get_course(db, course.id)
 
@@ -89,6 +92,7 @@ def update_course(db: Session, course_id: int, data: CourseUpdate) -> dict:
             row.target_completions = new_target
     if diff:
         log_event(db, now, "user", "course_updated", "course", course.id, diff)
+        publish_after_commit(db, "master_data.changed", {"entity": "courses"})
         db.commit()
     return get_course(db, course.id)
 
@@ -103,4 +107,5 @@ def delete_course(db: Session, course_id: int) -> None:
         db.delete(row)
     log_event(db, now, "user", "course_deleted", "course", course.id, {"code": course.code, "name": course.name})
     db.delete(course)
+    publish_after_commit(db, "master_data.changed", {"entity": "courses"})
     db.commit()
