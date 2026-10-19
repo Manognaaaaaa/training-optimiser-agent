@@ -97,6 +97,19 @@ API: `POST /api/planner/runs`, `GET /api/planner/runs`, `GET /api/planner/runs/{
 
 **Latest live result** (local `qwen2.5:7b`, 3 samples for one capacity-gap alert): 2 valid, 1 invalid (a driver who was unavailable, caught by the checker), 0 invented IDs. See the report for the example plan and cost per sample.
 
+### Planner v2: why plans were invalid, and what changed
+
+The first live runs produced only invalid plans: every sample booked night-shift drivers into a 09:00 session they could not attend, even though valid plans existed. The causes were tooling, not the model: no tool could check drivers for a *new* session time, the prompt showed only 09:00 slots, and the tool text promised two `validate_plan` calls while the code allowed one. What changed (details in [docs/agent_planner.md](docs/agent_planner.md)):
+
+- **Time-aware tools:** `find_eligible_drivers` checks one session time (existing or new) and says why drivers were excluded; `suggest_session_times` offers windows where a trainer is free and drivers can attend; the alert context lists the pool by shift and which start hours work for each.
+- **Repair and prune:** violations come back with a fix hint (3 `validate_plan` calls). If the final plan is still invalid, the rejected parts are removed and the result is kept as a separate `llm_pruned` plan. The raw LLM plan is stored untouched, so hallucination metrics stay honest.
+- **Diversity:** distinct strategies, later samples are told what earlier ones did, near copies are marked duplicates.
+- **Rule-based baseline:** every run also stores one plan made by plain code, so a valid option exists whenever one can.
+- **Honest "no plan":** if no valid plan can exist, the AI is not called and the alert says why (for example no trainer free).
+- **Lead time:** new sessions must start at least 48 hours from now. This is a planner policy; the constraint checker is unchanged.
+
+Debug a run with `python -m scripts.debug_planner_run <run id>`; ask whether a valid plan exists with `python -m scripts.feasibility_check <alert id>`; compare before and after with `python -m scripts.planner_eval` (results in [docs/planner_report.md](docs/planner_report.md)). New settings: `PLANNER_MAX_VALIDATE_CALLS`, `PLANNER_MIN_LEAD_HOURS`, `PLANNER_MIN_NEW_SESSION_SIZE`, `PLANNER_GREEDY_BASELINE`, `PLANNER_DUPLICATE_OVERLAP`.
+
 ### Ranking and the alerts inbox (Phase 6)
 
 When a planner run finishes, the valid plans are scored and ranked by plain code (closes the gap, chance of hitting the target, fairness, disruption, trainer time), the LLM writes a short message that is checked against the real numbers and names, and the alert becomes **Plans ready**. Open **Alerts**, choose "Act as trainer" at the top, and **Approve** or **Reject** a plan. Approving re-checks the plan against today's data, applies it in one transaction and queues the changes for the calendar (Phase 7). **The database schema changed: delete `backend/training.db` and re-seed.** Details: [docs/ranking_and_alerts.md](docs/ranking_and_alerts.md).
@@ -135,7 +148,7 @@ The design rules (colours, fonts, components, plain-language wording) are in [do
 
 ### After pulling a schema change
 
-Phases 3 and 5 changed the database schema. If you have an older `backend/training.db`, delete it and re-seed:
+Phases 3, 5 and 6 and planner v2 changed the database schema. If you have an older `backend/training.db`, delete it and re-seed:
 
 ```powershell
 cd backend
@@ -147,7 +160,8 @@ python -m app.simulator.seed --seed 42 --reset
 
 - `backend/` : API, simulator, constraint checker, agent planner, services, tests
   - `app/llm/` : LLM client (Groq or any OpenAI-compatible API), fake client for tests, prompts, read-only agent tools, planner loop
-  - `scripts/planner_smoke.py` : live planner test and report
+  - `scripts/planner_smoke.py`, `smoke_phase6.py` : live planner and alerts tests with reports
+  - `scripts/debug_planner_run.py`, `feasibility_check.py`, `planner_eval.py` : inspect a run, check whether a valid plan exists, compare before and after
 - `frontend/` : React app
 - `docs/` : project brief, constraint rules, planner notes and reports
 
@@ -161,7 +175,7 @@ python -m app.simulator.seed --seed 42 --reset
 | 3 | Tracking + forecasting: dashboard charts, shortfall risk flags | Done |
 | 4 | Constraint checker (built before the agent) | Done |
 | 5 | Agent planner: LLM produces N structured plans from real DB lookups | Done |
-| 6 | Ranking + alerts inbox: scored plans, LLM alerts, Approve / Reject | |
+| 6 | Ranking + alerts inbox: scored plans, LLM alerts, Approve / Reject | Done |
 | 7 | Calendar sync + live updates | |
 | 8 | Responsible AI: audit log, fairness panel, hallucination catch rate | |
 | 9 | Eval, polish, deploy | |

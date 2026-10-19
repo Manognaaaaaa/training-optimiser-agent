@@ -225,7 +225,13 @@ function Detail({ alertId, simNow, actorId }: { alertId: number; simNow?: string
       )}
 
       {status === 'no_valid_plans' && (
-        <EmptyState title="No safe plan was found">The AI's ideas all broke a training rule or it found no fix. You can try again, or dismiss the alert.</EmptyState>
+        <EmptyState title={run?.infeasibility ? 'No valid plan can exist right now' : 'No safe plan was found'}>
+          {run?.infeasibility ? (
+            <span>{run.infeasibility.message} The AI was not asked, because there was nothing valid to find.</span>
+          ) : (
+            <span>The AI's ideas all broke a training rule or it found no fix. You can try again, or dismiss the alert.</span>
+          )}
+        </EmptyState>
       )}
 
       {d.other_valid.length > 0 && (

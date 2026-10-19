@@ -17,6 +17,9 @@ export interface PlannerRun {
   n_step_limit: number
   n_duplicates: number
   n_llm_errors: number
+  n_pruned: number
+  n_greedy: number
+  infeasibility: { code: string; message: string; numbers: Record<string, unknown> } | null
   model: string
   prompt_version: string
   started_at: string | null

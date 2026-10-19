@@ -18,6 +18,11 @@ const PARTS: { key: ComponentName; label: string; bar: string; help: string }[] 
   { key: 'resource', label: 'Little trainer time', bar: 'bg-risk-unknown', help: 'Fewer extra trainer hours scores higher' },
 ]
 
+const SOURCE_LABEL: Record<string, string> = {
+  llm_pruned: 'AI plan with the rejected parts removed',
+  greedy_baseline: 'Rule-based plan (no AI)',
+}
+
 const pct = (p: number) => `${Math.round(p * 100)}%`
 
 /** One stacked bar: each coloured part is that component's weighted share of the total score. */
@@ -138,6 +143,7 @@ export default function PlanCard({ plan, actorId, isTop, canDecide, onRegenerate
       <header className="flex flex-wrap items-center gap-2">
         <span className="font-heading text-lg font-semibold text-ink">{isTop ? 'Recommended: plan' : 'Plan'} {plan.rank}</span>
         <Tag>Score {plan.score_total?.toFixed(2)}</Tag>
+        {SOURCE_LABEL[plan.source] && <Tag title="Where this plan came from">{SOURCE_LABEL[plan.source]}</Tag>}
         {plan.status !== 'valid' && <Tag className="capitalize">{plan.status}</Tag>}
         {plan.fairness_flag && (
           <span className="inline-flex items-center gap-1 rounded-full bg-risk-high-bg px-2 py-0.5 text-xs font-medium text-risk-high">

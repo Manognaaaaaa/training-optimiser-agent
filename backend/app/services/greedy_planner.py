@@ -10,7 +10,6 @@ Which driver comes first: the one with the best predicted show-up rate, with a p
 already carry more than their share of the eligible pool, so the burden is spread. The plan goes through the same
 ``check_plan`` as every other plan; nothing here is trusted.
 """
-import math
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
@@ -29,6 +28,7 @@ MAX_NEW_SESSIONS = 2
 CANDIDATE_WINDOWS_TO_TRY = 6
 SEARCH_DAYS = 28
 FAIRNESS_PENALTY = 0.5  # how strongly a group over its pool share is pushed down the order
+CONFIDENCE_Z = 1.28  # aim for about a 90% chance of hitting the target, not just "expected completions reach it"
 
 
 class _Picker:
@@ -71,7 +71,10 @@ def build_greedy_plan(db: Session, alert: Alert, ctx: ScoringContext, feas: Feas
     now = ctx.now
     course: Course = db.get(Course, alert.course_id)
     feas = feas or Feasibility(db, course, now)
-    gap = ctx.gap
+    # The goal is to reach the target with some confidence. An attendance_gap alert can have expected completions at or
+    # above the target but a low chance of hitting it, so the goal includes a safety margin of CONFIDENCE_Z standard deviations.
+    fc = ctx.fc
+    gap = max(ctx.gap, fc.target - fc.attended - fc.mu + CONFIDENCE_Z * fc.sigma)
     if gap <= 1e-9 or not feas.pool:
         return None
 

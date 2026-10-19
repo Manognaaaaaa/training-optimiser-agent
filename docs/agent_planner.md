@@ -50,9 +50,10 @@ All results are compact JSON, capped at `MAX_TOOL_ROWS = 25` rows (`"truncated":
 | `get_alert_context(alert_id)` | course, target, attended, projected, low/high, p_hit, shortfall type, reasons, gap, eligible pool, sim now, booking window | none (reads the alert's stored details) |
 | `list_upcoming_sessions(course_id, from_date?, to_date?, min_free_seats?)` | future scheduled sessions: booked, free seats, fill rate, `inside_booking_window` | none |
 | `get_session_roster(session_id)` | booked drivers: id, name, shift, depot | none |
-| `find_eligible_drivers(course_id, session_id, limit?, move_from_session_id?)` | drivers who can be booked into the session | every `BOOKING_RULES` rule, through `driver_can_book` |
+| `find_eligible_drivers(course_id, session_id` **or** `start, end?, limit?, move_from_session_id?)` | drivers who pass every rule for ONE session time (an existing session, or a proposed new one), `excluded_counts` per violation code, `pool_summary` by shift | every `BOOKING_RULES` rule, through `driver_can_book` |
+| `suggest_session_times(course_id, date_from?, date_to?, target_shift?, min_drivers?)` | up to 8 windows for a new session: `start`, `end`, `available_driver_count`, `available_by_shift`, `qualified_trainers_free`, `room_free` | booking rules for every pool driver + new-session rules for every trainer |
 | `find_trainer_slots(course_id, from_date?, to_date?, limit?)` | `(trainer_id, start, end)` slots for a new session | every `ADD_SESSION_RULES` rule, through `trainer_can_run` |
-| `validate_plan(plan)` | `is_valid` + violations from the real checker; **max 1 call per sample** | all of `check_plan` |
+| `validate_plan(plan)` | `is_valid` + compact violations `{code, driver_id, session_ref, action_index, fix_hint}` from the real checker plus the planner policy; **max `PLANNER_MAX_VALIDATE_CALLS` (3) calls per sample** | all of `check_plan` |
 | `submit_plan(plan)` | ends the sample | |
 | `submit_no_plan(reason)` | ends the sample, counted as `no_plan` | |
 
@@ -74,7 +75,7 @@ Samples are sequential (Groq rate limits). Temperatures cycle through `[0.2, 0.5
 - `attendance_gap`: fill free seats in upcoming sessions with extra eligible drivers / move drivers away from sessions that clash with their shift into ones that fit / prioritise sessions inside the booking window
 - `pool_gap`: enrol eligible drivers who have no booking yet / spread new bookings across several sessions
 
-Both are stored on each plan.
+Both are stored on each plan. (Planner v2 changed these lists, see below.)
 
 ## Dedupe
 
@@ -118,3 +119,33 @@ python -m scripts.planner_smoke --n 3 --alerts 1
 ```
 
 With no key set it prints a message and exits 0.
+
+## Planner v2: what the first live runs taught us
+
+**The problem.** On a real alert (Hazmat Awareness, simulated date 1 April) all 3 samples were rejected by the checker. Every sample created one session on Wed 01 Apr at 09:00 and booked night-shift drivers into it (`DRIVER_ON_SHIFT`, `NIGHT_SHIFT_MORNING`). The checker was right; a valid plan existed (420 usable windows, and every existing session took drivers). `python -m scripts.debug_planner_run <run id>` prints what each sample did and `python -m scripts.feasibility_check <alert id>` answers "does a valid plan exist, and at which hours?" using the checker's own rule functions.
+
+**Root causes (confirmed from the trace):**
+
+1. `find_eligible_drivers` only worked for an existing session, so for a NEW session the model could not check drivers at all (it tried `session_id: "new:1"` and got errors).
+2. The prompt showed the first 4 results of `find_trainer_slots`: four trainers at the same moment, Wed 01 Apr 09:00. The model never saw another time.
+3. The drivers shown in the prompt were the first 6 by id for two existing 18:00 sessions (mostly night drivers) and the model reused them for the 09:00 session.
+4. The tool text promised 2 `validate_plan` calls but the code allowed 1, so the model saw the violations once, could not re-check, and submitted the same invalid plan.
+5. Because all three samples saw identical facts, the strategy hints could not make them differ.
+
+**What changed:**
+
+- `services/feasibility.py` is the single source for "who and when works": pool, windows (Sun-Thu 09/14/18), free trainers, start hours per shift, and `assess()` (does any valid plan exist?). Everything calls the checker's rule functions.
+- Time-aware `find_eligible_drivers` and the new `suggest_session_times` (above). `get_alert_context` adds the pool by shift, the start hours that work per shift (computed) and existing sessions with room and how many pool drivers can attend each. Driver lists mix shifts instead of being the first ids. Nationality is still never shown (see the section above); `pool_summary` is by shift only.
+- **Lead time (planner policy, not a checker rule):** a new session must start at least `PLANNER_MIN_LEAD_HOURS` (48) from now. The tools only offer such times; a plan that breaks it is stored as invalid with code `PLANNER_LEAD_TIME` (category `policy`). `docs/constraint_rules.md` and approval are unchanged.
+- **Prompt `p6-v2`:** work in order (pool by shift, existing sessions, `suggest_session_times` then `find_eligible_drivers` for that exact start, validate, submit) and the rule "never assign a driver to a session time you have not checked". The prompt, the tool description and the code all use `PLANNER_MAX_VALIDATE_CALLS` (default 3).
+- **Repair:** violations come back as `{code, driver_id, session_ref, fix_hint}` with one fixed hint per code (`llm/fix_hints.py`; a test requires a hint for every checker code).
+- **Prune:** if the final plan is still invalid, `llm/repair.prune_plan` removes only the rejected actions (and a new session left under `PLANNER_MIN_NEW_SESSION_SIZE` drivers), re-checks, and keeps the result only if it is valid and still adds at least 1 expected completion. It is stored as a separate plan with `source = llm_pruned` and `parent_plan_id`. The raw plan stays stored as it was.
+- **Diversity:** strategies per shortfall type are distinct (fill existing only; one new afternoon/evening session for the largest shift group in the pool; two sessions on different days; mix), later samples are told what earlier ones proposed, and a sample that shares more than 80% of its session times and drivers with an earlier one is marked `is_duplicate` (not ranked).
+- **Baseline:** `services/greedy_planner.py` builds a deterministic plan in every run (existing sessions first, emptiest first; then up to two new sessions), spreading the burden across shift and nationality. Stored with `source = greedy_baseline`; it is ranked with the others. `PLANNER_GREEDY_BASELINE=false` turns it off.
+- **Honest "no plan":** before any sampling, `assess()` checks that a valid plan can exist. If not, the run stores `infeasibility = {code, message, numbers}` (`pool_empty`, `no_trainer_free`, `no_driver_available`), makes zero LLM calls, and the alert becomes `no_valid_plans` with that reason in its message and in the inbox.
+
+**Plan sources and metrics.** Every plan has `source`: `llm`, `llm_pruned` or `greedy_baseline`. `GET /api/planner/metrics`, the run counters (`n_valid`, `n_invalid`, ...) and `samples_done` count only raw `llm` plans, so the Phase 8 hallucination and catch-rate numbers describe the model, not our fixes. `n_pruned` and `n_greedy` count the others.
+
+**Config:** `PLANNER_MAX_VALIDATE_CALLS` (3), `PLANNER_MIN_LEAD_HOURS` (48), `PLANNER_MIN_NEW_SESSION_SIZE` (3), `PLANNER_GREEDY_BASELINE` (true), `PLANNER_DUPLICATE_OVERLAP` (0.8), `PLANNER_CONTEXT_CHAR_BUDGET` (16000, raised because the tool list and facts are larger).
+
+Measured before/after numbers are in `docs/planner_report.md` (`python -m scripts.planner_eval`).

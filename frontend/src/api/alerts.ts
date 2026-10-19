@@ -74,6 +74,8 @@ export interface PlanView {
   rank: number | null
   status: PlanStatus
   outcome: string
+  source: 'llm' | 'llm_pruned' | 'greedy_baseline'
+  parent_plan_id: number | null
   score_total: number | null
   score_breakdown: ScoreBreakdown | Record<string, never>
   fairness_flag: boolean
