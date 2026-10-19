@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.calendar.base import APP_TAG, CalendarError, Gone, NotFound
 from app.calendar.factory import CalendarBackend
 from app.calendar.mapping import build_event, content_hash, normalize_remote
-from app.calendar.sync import enqueue, utcnow
+from app.calendar.sync import enqueue, stats, utcnow
 from app.config import settings
 from app.models import CalendarLink, CalendarOutbox, TrainingSession
 from app.services.audit import log_event
@@ -34,7 +34,11 @@ def status_summary(db: Session, backend: CalendarBackend) -> dict:
     recent = db.scalars(select(CalendarOutbox).order_by(CalendarOutbox.id.desc()).limit(20))
     links = dict(db.execute(select(CalendarLink.sync_status, func.count()).group_by(CalendarLink.sync_status)).all())
     return {"provider": backend.provider, "calendar_id": backend.calendar_id, "enabled": settings.calendar_sync_enabled,
-            "counts": counts, "links": links, "last_success_at": last_ok, "recent": [row_to_dict(r) for r in recent]}
+            "counts": counts, "links": links, "last_success_at": last_ok, "recent": [row_to_dict(r) for r in recent],
+            "stats": {  # since the server started
+                "synced": stats.synced, "skipped_by_hash": stats.skipped_by_hash, "api_calls": stats.api_calls,
+                "retries": stats.retries, "failures": stats.failures, "coalesced": stats.coalesced, "drift": stats.drift,
+                "approve_to_synced_seconds": stats.approve_to_synced_seconds[-200:]}}
 
 
 def failed_rows(db: Session) -> list[dict]:
