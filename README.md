@@ -85,7 +85,7 @@ API: `/api/tracking/summary`, `/api/tracking/courses`, `/api/tracking/courses/{i
 
    **Free tiers are small.** Groq's free tier allows about 8,000 tokens per minute and 200,000 per day for that model. The planner keeps prompts short and retries rate limits, but a full run can still hit the daily cap. A local model has no limits: install [Ollama](https://ollama.com), run `ollama pull qwen2.5:7b`, then set `GROQ_API_KEY=ollama`, `GROQ_BASE_URL=http://localhost:11434/v1`, `GROQ_MODEL=qwen2.5:7b` and `LLM_TIMEOUT_SECONDS=600`.
 
-2. Seed, advance about 20 weeks on the Simulation page, open a course that has an open alert (Dashboard, then the course), and press **Generate plans**. You see progress, then each plan with its outcome (valid, invalid, schema invalid, no plan), the rules it broke, and the model's rationale. There is no approve button yet (Phase 6).
+2. Seed, advance about 20 weeks on the Simulation page, open a course that has an open alert (Dashboard, then the course), and press **Generate plans**. You see progress, then each plan with its outcome (valid, invalid, schema invalid, no plan), the rules it broke, and the model's rationale. Plans are ranked and approved on the Alerts page (Phase 6).
 
 3. Live smoke test against the real model (uses its own `smoke.db`, never `training.db`, and writes [docs/planner_report.md](docs/planner_report.md)):
 
@@ -96,6 +96,16 @@ API: `/api/tracking/summary`, `/api/tracking/courses`, `/api/tracking/courses/{i
 API: `POST /api/planner/runs`, `GET /api/planner/runs`, `GET /api/planner/runs/{id}`, `GET /api/planner/metrics`.
 
 **Latest live result** (local `qwen2.5:7b`, 3 samples for one capacity-gap alert): 2 valid, 1 invalid (a driver who was unavailable, caught by the checker), 0 invented IDs. See the report for the example plan and cost per sample.
+
+### Ranking and the alerts inbox (Phase 6)
+
+When a planner run finishes, the valid plans are scored and ranked by plain code (closes the gap, chance of hitting the target, fairness, disruption, trainer time), the LLM writes a short message that is checked against the real numbers and names, and the alert becomes **Plans ready**. Open **Alerts**, choose "Act as trainer" at the top, and **Approve** or **Reject** a plan. Approving re-checks the plan against today's data, applies it in one transaction and queues the changes for the calendar (Phase 7). **The database schema changed: delete `backend/training.db` and re-seed.** Details: [docs/ranking_and_alerts.md](docs/ranking_and_alerts.md).
+
+Live smoke test (own `smoke.db`, writes [docs/alerts_report.md](docs/alerts_report.md)):
+
+```powershell
+python -m scripts.smoke_phase6 --n 3 --alerts 3
+```
 
 ### Frontend
 
