@@ -237,7 +237,7 @@ def template_message(pack: dict) -> AlertMessageOut:
             plan_id=p["plan_id"],
             rationale=(f"Ranked {p['rank']} with a score of {p['score_total']}. It raises the chance of hitting the target "
                        f"from {p['chance_of_hitting_target_before_pct']}% to {p['chance_of_hitting_target_after_pct']}%."),
-            tradeoffs=f"It touches {p['drivers_moved']} drivers and adds {p['sessions_added']} sessions.",
+            tradeoffs=f"It touches {p['drivers_moved']} driver(s) and adds {p['sessions_added']} session(s).",
         ))
     if pack["plans"]:
         caveats = []

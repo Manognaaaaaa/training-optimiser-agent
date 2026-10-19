@@ -12,12 +12,15 @@ export class ApiError extends Error {
   status: number
   /** {field: message} from a 422, so forms can mark the bad inputs. */
   fieldErrors: Record<string, string>
+  /** The whole JSON body of the error response (for example the checker's violations on a 409). */
+  body: Record<string, unknown>
 
-  constructor(status: number, detail: string, fieldErrors: Record<string, string> = {}) {
+  constructor(status: number, detail: string, fieldErrors: Record<string, string> = {}, body: Record<string, unknown> = {}) {
     super(detail)
     this.name = 'ApiError'
     this.status = status
     this.fieldErrors = fieldErrors
+    this.body = body
   }
 }
 
@@ -35,14 +38,16 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (!response.ok) {
     let detail = `API error ${response.status} on ${path}`
     let fieldErrors: Record<string, string> = {}
+    let errorBody: Record<string, unknown> = {}
     try {
       const body = await response.json()
+      if (body && typeof body === 'object') errorBody = body
       if (typeof body.detail === 'string') detail = body.detail
       if (body.errors && typeof body.errors === 'object') fieldErrors = body.errors
     } catch {
       // body was not JSON: keep the generic message
     }
-    throw new ApiError(response.status, detail, fieldErrors)
+    throw new ApiError(response.status, detail, fieldErrors, errorBody)
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T

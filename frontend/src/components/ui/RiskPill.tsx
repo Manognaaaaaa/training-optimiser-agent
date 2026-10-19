@@ -30,6 +30,6 @@ export function RiskPill({ level, className }: { level: RiskLevel; className?: s
 }
 
 /** Neutral small tag, e.g. Mandatory / Optional. */
-export function Tag({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cn('inline-block whitespace-nowrap rounded-full bg-risk-unknown-bg px-2 py-0.5 text-xs text-ink-muted', className)}>{children}</span>
+export function Tag({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
+  return <span title={title} className={cn('inline-block whitespace-nowrap rounded-full bg-risk-unknown-bg px-2 py-0.5 text-xs text-ink-muted', className)}>{children}</span>
 }

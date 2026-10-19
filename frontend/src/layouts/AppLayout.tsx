@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { getTrackingSummary } from '../api/tracking'
+import { getAlertCounts } from '../api/alerts'
 import ApiStatus from '../components/ApiStatus'
 import { SimClock } from '../components/shell/SimClock'
 import { cn } from '../lib/cn'
@@ -68,8 +68,8 @@ function breadcrumbFor(pathname: string, search: URLSearchParams): string[] {
 function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const location = useLocation()
   const search = new URLSearchParams(location.search)
-  const summary = useQuery({ queryKey: ['tracking', 'summary'], queryFn: getTrackingSummary })
-  const openAlerts = summary.data?.open_alerts ?? 0
+  const counts = useQuery({ queryKey: ['alerts', 'counts'], queryFn: getAlertCounts, refetchInterval: 10_000 })
+  const openAlerts = counts.data?.plans_ready ?? 0
 
   return (
     <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto px-3 py-2">
@@ -101,7 +101,7 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
                           current ? 'bg-white text-primary' : 'bg-risk-high text-white',
                           collapsed && 'absolute ml-5 -mt-5 px-1 text-[10px]',
                         )}
-                        aria-label={`${openAlerts} open alerts`}
+                        aria-label={`${openAlerts} alerts with plans ready`}
                       >
                         {openAlerts}
                       </span>

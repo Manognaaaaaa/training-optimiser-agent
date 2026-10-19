@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, CircleDot } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { listAlerts } from '../api/alerts'
+import { ACTIVE_STATUSES, listAlerts } from '../api/alerts'
 import { ApiError } from '../api/client'
 import {
   getPlannerRun, isRunActive, listPlannerRuns, startPlannerRun, type Outcome, type PlannerPlan, type PlannerRunDetail,
@@ -127,7 +127,7 @@ export default function PlannerPanel({ courseId, renderPlanFooter }: { courseId:
   const [n, setN] = useState(3)
   const [startedRunId, setStartedRunId] = useState<number | null>(null)
 
-  const alert = useQuery({ queryKey: ['alerts', 'open', courseId], queryFn: () => listAlerts({ status: 'open', course_id: courseId }) })
+  const alert = useQuery({ queryKey: ['alerts', 'open', courseId], queryFn: () => listAlerts({ status: ACTIVE_STATUSES, course_id: courseId }) })
   const alertId = alert.data?.[0]?.id
   const runs = useQuery({ queryKey: ['planner', 'runs', alertId], queryFn: () => listPlannerRuns({ alert_id: alertId }), enabled: alertId !== undefined })
   const runId = startedRunId ?? runs.data?.[0]?.id ?? null
