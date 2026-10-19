@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     alert_writer_temperature: float = 0.2
     auto_plan_on_high_risk: bool = False  # start plan generation for new high-risk alerts after the weekly close
 
+    # Calendar sync and live updates (Phase 7)
+    app_env: str = "dev"  # tags every Google event, so two machines sharing one sandbox calendar do not collide
+    app_base_url: str = "http://localhost:5173"  # used for links in event descriptions
+    calendar_provider: str = "fake"  # fake | google
+    google_service_account_file: str = ""
+    google_calendar_id: str = ""
+    calendar_timezone: str = "Asia/Dubai"
+    calendar_sync_enabled: bool = True
+    calendar_sync_interval_seconds: float = 5
+    calendar_max_attempts: int = 5
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")

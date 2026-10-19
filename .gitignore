@@ -22,3 +22,8 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Google service account keys
+service-account*.json
+*-credentials.json
+secrets/
