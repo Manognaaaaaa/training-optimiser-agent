@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     planner_default_n: int = 5
     planner_max_n: int = 10
     planner_max_steps: int = 8
-    planner_context_char_budget: int = 10000  # keep each request under this many characters (about 5,500 tokens)
+    planner_context_char_budget: int = 16000  # keep each request under this many characters (about 9,000 tokens)
+    planner_max_validate_calls: int = 3  # how many times the agent may check a draft plan before it must submit
+    planner_min_lead_hours: int = 48  # planner policy (not a checker rule): new sessions must start at least this long from now
+    planner_min_new_session_size: int = 3  # the prune step drops a new session left with fewer drivers than this
+    planner_greedy_baseline: bool = True  # also build a deterministic rule-based plan in every run
+    planner_duplicate_overlap: float = 0.8  # a sample sharing more than this fraction of its sessions and drivers with an earlier one is a duplicate
     planner_sample_pause_seconds: float = 3  # pause between samples so Groq's per-minute limits can recover
 
     # Ranking and alerts (Phase 6)

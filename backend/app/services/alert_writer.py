@@ -76,7 +76,12 @@ def _change_text(c: dict) -> str:
             f"to session {c['to_session_id']} ({c['to_when']})")
 
 
-def build_fact_pack(db: Session, alert: Alert, presented: list[Plan], ctx: ScoringContext) -> dict:
+MADE_BY = {"llm": "AI model", "llm_pruned": "AI plan trimmed by the checker", "greedy_baseline": "rule-based baseline"}
+
+
+def build_fact_pack(
+    db: Session, alert: Alert, presented: list[Plan], ctx: ScoringContext, infeasibility: dict | None = None,
+) -> dict:
     """Everything the LLM may talk about. Numbers are rounded here so the LLM can copy them as they are."""
     fc = ctx.fc
     details = alert.details or {}
@@ -89,11 +94,12 @@ def build_fact_pack(db: Session, alert: Alert, presented: list[Plan], ctx: Scori
             "score_components": {k: round(v, 2) for k, v in b["components"].items()},
             "chance_of_hitting_target_before_pct": round(b["p_hit_before"] * 100),
             "chance_of_hitting_target_after_pct": round(b["p_hit_after"] * 100),
+            "made_by": MADE_BY.get(plan.source, "AI model"),
             "drivers_moved": b["drivers_moved"], "sessions_added": b["sessions_added"],
             "fairness_flag": b["fairness_flag"],
             "changes": [_change_text(c) for c in changes],
         })
-    return {
+    pack = {
         "course": {"id": alert.course_id, "code": fc.code, "name": fc.name},
         "sim_date": ctx.now.date().isoformat(),
         "target_completions": fc.target,
@@ -106,6 +112,9 @@ def build_fact_pack(db: Session, alert: Alert, presented: list[Plan], ctx: Scori
         "reasons": [r.get("message", "") for r in details.get("reasons", [])][:5],
         "plans": plans,
     }
+    if infeasibility:
+        pack["no_plan_reason"] = infeasibility.get("message", "")
+    return pack
 
 
 # --- Grounding check ---------------------------------------------------------------------------------
@@ -241,6 +250,8 @@ def template_message(pack: dict) -> AlertMessageOut:
         ))
     if pack["plans"]:
         caveats = []
+    elif pack.get("no_plan_reason"):
+        caveats = [pack["no_plan_reason"]]
     else:
         caveats = ["No plan passed the checks yet. Try generating plans again."]
     best = next((p["plan_id"] for p in pack["plans"] if p["rank"] == 1), 0)
@@ -285,7 +296,7 @@ def write_alert_message(
 ) -> AlertMessage:
     """Write (and ground-check) the alert text. Stores one row per attempt and returns the final one. Does not commit."""
     now = ctx.now
-    pack = build_fact_pack(db, alert, presented, ctx)
+    pack = build_fact_pack(db, alert, presented, ctx, run.infeasibility if run else None)
     names = _known_names(db)
     model = getattr(llm, "model", "") or settings.groq_model
     run_id = run.id if run else None
@@ -337,6 +348,8 @@ def write_alert_message(
     db.flush()
     shown = AlertMessageOut.model_validate(final.parsed)
     alert.message = f"{shown.headline}\n{shown.summary}"
+    if shown.caveats:
+        alert.message += "\n" + " ".join(shown.caveats)
     log_event(db, now, "agent", "alert_message_written", "alert", alert.id, {
         "message_id": final.id, "model": model, "prompt_version": PROMPT_VERSION, "prompt_hash": prompt_hash(),
         "grounding_ok": final.grounding_ok, "used_fallback": final.used_fallback, "attempts": attempts,

@@ -27,10 +27,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-# Lets the React app (port 5173) call this API (port 8000)
+# Lets the React app call this API (port 8000). The configured origin is always allowed; any localhost port is too,
+# because Vite moves to 5174, 5175... when 5173 is busy.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

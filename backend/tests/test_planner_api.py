@@ -62,8 +62,7 @@ def test_labels_resolve_new_session_refs(api, adb):
     alert = adb.get(Alert, ALERT_ID)
     now = get_sim_now(adb)
     slot = run_read_only_tool(adb, now, "find_trainer_slots", {"course_id": alert.course_id, "limit": 1})["slots"][0]
-    driver = run_read_only_tool(adb, now, "list_upcoming_sessions", {"course_id": alert.course_id, "min_free_seats": 1})["sessions"][0]
-    eligible = run_read_only_tool(adb, now, "find_eligible_drivers", {"course_id": alert.course_id, "session_id": driver["session_id"]})["drivers"][0]
+    eligible = run_read_only_tool(adb, now, "find_eligible_drivers", {"course_id": alert.course_id, "start": slot["start"]})["drivers"][0]
     plan = {"course_id": alert.course_id, "actions": [
         {"type": "add_session", "temp_ref": "new:1", "course_id": alert.course_id, "trainer_id": slot["trainer_id"],
          "start": slot["start"], "end": slot["end"], "location": "Room", "capacity": 5},

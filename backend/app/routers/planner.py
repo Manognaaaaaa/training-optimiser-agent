@@ -8,7 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -35,13 +35,14 @@ def get_session_factory() -> Callable[[], Session]:
 
 # --- Serialising ------------------------------------------------------------------------------------
 def run_to_dict(db: Session, run: PlannerRun) -> dict:
-    samples_done = len(db.scalars(select(Plan.id).where(Plan.run_id == run.id)).all())
+    samples_done = len(db.scalars(select(Plan.id).where(Plan.run_id == run.id, Plan.source == "llm")).all())
     return {
         "id": run.id, "alert_id": run.alert_id, "course_id": run.course_id, "status": run.status,
         "n_requested": run.n_requested, "samples_done": samples_done,
         "n_valid": run.n_valid, "n_invalid": run.n_invalid, "n_schema_invalid": run.n_schema_invalid,
         "n_no_plan": run.n_no_plan, "n_step_limit": run.n_step_limit, "n_duplicates": run.n_duplicates,
-        "n_llm_errors": run.n_llm_errors, "model": run.model, "prompt_version": run.prompt_version,
+        "n_llm_errors": run.n_llm_errors, "n_pruned": run.n_pruned, "n_greedy": run.n_greedy,
+        "infeasibility": run.infeasibility, "model": run.model, "prompt_version": run.prompt_version,
         "started_at": run.started_at, "finished_at": run.finished_at, "duration_ms": run.duration_ms,
         "total_tokens": run.total_tokens, "error": run.error,
     }
@@ -101,6 +102,7 @@ def plan_to_dict(plan: Plan, labels: _Labels, include_trace: bool = False) -> di
     out = {
         "id": plan.id, "run_id": plan.run_id, "alert_id": plan.alert_id, "sample_index": plan.sample_index,
         "strategy": plan.strategy, "temperature": plan.temperature, "outcome": plan.outcome, "is_valid": plan.is_valid,
+        "source": plan.source, "parent_plan_id": plan.parent_plan_id,
         "is_duplicate": plan.is_duplicate, "rationale": plan.rationale, "actions": actions,
         "action_labels": [labels.action(a) for a in actions],  # in order, so temp refs of earlier add_session resolve
         "violations": plan.rejection_reasons or [], "draft_violations": plan.draft_violations or [],
@@ -178,7 +180,9 @@ def _pct(part: int, whole: int) -> float:
 @router.get("/metrics")
 def metrics(db: Session = Depends(get_db)):
     """Hallucination and cost numbers across every stored agent plan. Phase 8 will draw a page from this."""
-    plans = list(db.scalars(select(Plan).where(Plan.run_id.is_not(None))))
+    # Only the raw model output counts here: pruned and rule-based plans would hide what the LLM really did.
+    plans = list(db.scalars(select(Plan).where(Plan.run_id.is_not(None), Plan.source == "llm")))
+    by_source = {s: n for s, n in db.execute(select(Plan.source, func.count()).where(Plan.run_id.is_not(None)).group_by(Plan.source))}
     total = len(plans)
     fabricated_total = caught_total = with_hallucination = 0
     for p in plans:
@@ -197,7 +201,7 @@ def metrics(db: Session = Depends(get_db)):
         return round(sum(getattr(p, attr) or 0 for p in plans) / total, 1) if total else 0.0
 
     return {
-        "plans_total": total, "outcomes": outcomes,
+        "plans_total": total, "plans_by_source": by_source, "outcomes": outcomes,
         "valid_pct": _pct(outcomes.get("valid", 0), total),
         "schema_invalid_pct": _pct(outcomes.get("schema_invalid", 0), total),
         "hallucination_pct": _pct(with_hallucination, total),

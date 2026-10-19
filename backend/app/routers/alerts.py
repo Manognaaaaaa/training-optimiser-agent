@@ -84,6 +84,7 @@ def _plan_dict(db: Session, plan: Plan, texts: dict[int, dict], with_changes: bo
     text = texts.get(plan.id, {})
     out = {
         "id": plan.id, "run_id": plan.run_id, "rank": plan.rank, "status": plan.status, "outcome": plan.outcome,
+        "source": plan.source, "parent_plan_id": plan.parent_plan_id,
         "score_total": plan.score_total, "score_breakdown": plan.score_breakdown or {},
         "fairness_flag": bool((plan.score_breakdown or {}).get("fairness_flag")),
         "rationale": text.get("rationale"), "tradeoffs": text.get("tradeoffs"), "agent_rationale": plan.rationale,

@@ -119,12 +119,12 @@ def test_submit_no_plan(adb):
 def test_second_validate_call_is_refused(adb):
     plan = good_plan(adb)
     validate = tool_response("validate_plan", {"plan": plan})
-    llm = FakeLLMClient([validate, validate, submit(plan)])
+    llm = FakeLLMClient([validate, validate, validate, validate, submit(plan)])
     run = run_planner(adb, ALERT_ID, 1, llm)
     (row,) = plans_of(adb, run)
-    assert row.n_validate_calls == 1 and len(row.draft_violations) == 1 and row.outcome == "valid"
-    refusal = llm.requests[2]["messages"][-1]["content"]
-    assert "at most 1 times" in refusal and "submit_plan" in refusal
+    assert row.n_validate_calls == 3 and len(row.draft_violations) == 3 and row.outcome == "valid"  # the limit is planner_max_validate_calls
+    refusal = llm.requests[4]["messages"][-1]["content"]
+    assert "at most 3 times" in refusal and "submit_plan" in refusal
 
 
 def test_validate_reports_real_violations_to_the_agent(adb):
@@ -184,18 +184,19 @@ def test_temperatures_and_strategies_per_sample(adb):
     llm = FakeLLMClient([tool_response("submit_no_plan", {"reason": "x"}) for _ in range(5)])
     run = run_planner(adb, ALERT_ID, 5, llm)
     assert [r["temperature"] for r in llm.requests] == [0.2, 0.5, 0.7, 0.9, 1.0]
-    expected = prompts.STRATEGIES["capacity_gap"]
-    for i, request in enumerate(llm.requests):
-        assert expected[i % 3] in request["messages"][1]["content"]
     rows = plans_of(adb, run)
-    assert [r.strategy for r in rows] == [expected[i % 3] for i in range(5)] and [r.temperature for r in rows] == [0.2, 0.5, 0.7, 0.9, 1.0]
+    for row, request in zip(rows, llm.requests):
+        assert row.strategy in request["messages"][1]["content"]
+    assert len({r.strategy for r in rows[:4]}) == 4  # four distinct approaches before any repeat
+    assert "{largest_shift}" not in "".join(r.strategy for r in rows)  # the biggest shift group was filled in
+    assert [r.temperature for r in rows] == [0.2, 0.5, 0.7, 0.9, 1.0]
 
 
 def test_attendance_gap_strategies(adb):
     llm = FakeLLMClient([tool_response("submit_no_plan", {"reason": "x"}) for _ in range(3)])
     run_planner(adb, 6, 3, llm)
     for i, request in enumerate(llm.requests):
-        assert prompts.STRATEGIES["attendance_gap"][i] in request["messages"][1]["content"]
+        assert prompts.STRATEGIES["attendance_gap"][i].split("{")[0] in request["messages"][1]["content"]
 
 
 def test_system_prompt_is_short_and_prefetched_facts_reach_the_model(adb):
@@ -205,7 +206,8 @@ def test_system_prompt_is_short_and_prefetched_facts_reach_the_model(adb):
     llm = FakeLLMClient([tool_response("submit_no_plan", {"reason": "x"})])
     run_planner(adb, ALERT_ID, 1, llm)
     user = llm.requests[0]["messages"][1]["content"]
-    assert '"shortfall_type":"capacity_gap"' in user and '"sessions_with_free_seats"' in user
+    assert '"shortfall_type":"capacity_gap"' in user and '"existing_sessions_with_free_seats"' in user
+    assert '"best_new_session_windows"' in user and '"start_hours_that_work_by_shift"' in user
 
 
 def test_planner_never_changes_sessions_or_enrollments(adb):

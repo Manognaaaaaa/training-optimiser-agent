@@ -78,3 +78,9 @@ def adb(aengine):
 def no_planner_pause(monkeypatch):
     """The real pause between planner samples would only slow the tests down."""
     monkeypatch.setattr("app.config.settings.planner_sample_pause_seconds", 0)
+
+
+@pytest.fixture(autouse=True)
+def planner_defaults(monkeypatch):
+    """Most planner tests script exactly the LLM replies they need, so the rule-based baseline is off unless a test turns it on."""
+    monkeypatch.setattr("app.config.settings.planner_greedy_baseline", False)

@@ -20,22 +20,25 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.llm import prompts
 from app.llm.base import LLMClient, LLMError
-from app.llm.tools import TOOL_SPECS, run_read_only_tool
+from app.llm.fix_hints import hint_for
+from app.llm.repair import all_violations, compact_violations, prune_plan
+from app.llm.tools import run_read_only_tool, tool_specs
 from app.models import Alert, Course, Driver, Plan, PlannerRun, Trainer, TrainingSession
 from app.schemas.plan import Violation, parse_plan
 from app.services.alert_pipeline import CAN_GENERATE, finalize_run, restore_after_failed_run, set_alert_status
 from app.services.audit import log_event
-from app.services.constraints import CATEGORY, check_plan
+from app.services.constraints import CATEGORY
+from app.services.feasibility import Feasibility, assess
+from app.services.greedy_planner import build_greedy_plan
+from app.services.ranking import ScoringContext, build_context
 from app.services.sim_clock import get_sim_now
 
-MAX_VALIDATE_CALLS = 1
 MAX_FORMAT_REPAIRS = 1  # a plan with a format mistake is sent back once, with the exact error, before it is rejected
-TOOLS_CHARS = len(json.dumps(TOOL_SPECS))  # the tool schemas are sent with every request too
+TOOLS_CHARS = len(json.dumps(tool_specs()))  # the tool schemas are sent with every request too
 MAX_TOKENS_PER_STEP = 800  # Groq counts this reserve against the per-minute token limit
-PREFETCH_SESSIONS = 5
-PREFETCH_ELIGIBLE_SESSIONS = 2
-PREFETCH_DRIVERS_PER_SESSION = 6
-PREFETCH_SLOTS = 4
+PREFETCH_SESSIONS = 4
+PREFETCH_DRIVERS_PER_SESSION = 5
+PREFETCH_WINDOWS = 4
 TRACE_TEXT_LIMIT = 500
 RATIONALE_AUDIT_LIMIT = 500
 
@@ -148,6 +151,41 @@ def compute_plan_hash(actions: Any) -> str | None:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def plan_signature(actions: Any) -> set:
+    """What makes two plans "the same idea": the start times of the sessions they add and the drivers they book."""
+    sig: set = set()
+    for a in actions if isinstance(actions, list) else []:
+        if not isinstance(a, dict):
+            continue
+        if a.get("type") == "add_session":
+            sig.add(("session", str(a.get("start"))))
+        elif a.get("driver_id") is not None:
+            sig.add(("driver", a.get("driver_id")))
+    return sig
+
+
+def overlaps_earlier(sig: set, earlier: list[set]) -> bool:
+    """True when more than ``planner_duplicate_overlap`` of this plan (or of an earlier one) is shared with an earlier plan."""
+    if not sig:
+        return False
+    for other in earlier:
+        if other and len(sig & other) / max(len(sig), len(other)) > settings.planner_duplicate_overlap:
+            return True
+    return False
+
+
+def already_proposed_text(rows: list[Plan]) -> str:
+    """A short description of what earlier samples proposed, so the next sample does something different."""
+    parts = []
+    for row in rows:
+        actions = row.actions if isinstance(row.actions, list) else []
+        starts = sorted({str(a.get("start"))[:16] for a in actions if isinstance(a, dict) and a.get("type") == "add_session"})
+        drivers = sorted({a.get("driver_id") for a in actions if isinstance(a, dict) and a.get("driver_id") is not None})
+        if starts or drivers:
+            parts.append(f"new sessions at {starts or 'none'}, drivers {drivers[:12]}")
+    return "; ".join(parts[-3:])
+
+
 def summarise_actions(actions: Any) -> str:
     if not isinstance(actions, list):
         return "no actions"
@@ -186,21 +224,18 @@ def _force_ids(raw: dict, alert: Alert, state: SampleState | None = None) -> dic
 
 
 def _validate_for_agent(db: Session, now: datetime, alert: Alert, raw: Any, state: SampleState) -> dict:
-    """What the validate_plan tool returns: the real checker's verdict."""
+    """What the validate_plan tool returns: the real checker's verdict (plus planner policy), in a compact form with fix hints."""
     if not isinstance(raw, dict):
         return {"error": "plan must be a JSON object"}
     parsed = parse_plan(_force_ids(raw, alert))
     if isinstance(parsed, Violation):
         violations = [parsed]
-        result = {"is_valid": False, "violations": [{"code": parsed.code, "message": parsed.message}]}
+        result = {"is_valid": False, "violations": [{"code": parsed.code, "message": parsed.message[:300], "fix_hint": hint_for(parsed.code)}]}
     else:
-        check = check_plan(db, parsed, now)
-        violations = check.violations
+        violations = all_violations(db, parsed, now)
         result = {
-            "is_valid": check.is_valid,
-            "violations": [
-                {"code": v.code, "action_index": v.action_index, "message": v.message} for v in violations[:10]
-            ],
+            "is_valid": not violations,
+            "violations": compact_violations(parsed, violations),
             "truncated": len(violations) > 10,
         }
     state.draft_violations.append({"call": state.n_validate, "is_valid": result["is_valid"], "codes": [v.code for v in violations]})
@@ -239,44 +274,59 @@ def _assistant_message(resp) -> dict:
     return message
 
 
-def _prefetch_candidates(db: Session, now: datetime, alert: Alert, sessions: dict) -> dict:
-    """Drivers who can be booked into the first sessions, and open trainer slots. All from the same tools the model could call."""
-    out: dict[str, Any] = {}
-    by_session: dict[str, list] = {}
-    for session in (sessions.get("sessions") or [])[:PREFETCH_ELIGIBLE_SESSIONS]:
+def build_facts(db: Session, now: datetime, alert: Alert) -> str:
+    """The facts put in every sample's prompt, looked up once per run with the same tools the model could call.
+
+    Includes the pool by shift, which start hours work for each shift, existing sessions with room (with drivers who really
+    pass the rules for THAT session time, mixed across shifts) and the best windows for a new session.
+    """
+    ctx = run_read_only_tool(db, now, "get_alert_context", {"alert_id": alert.id})
+    facts: dict[str, Any] = {"alert": {k: ctx.get(k) for k in (
+        "alert_id", "course", "target", "attended", "projected", "gap", "shortfall_type", "pool",
+        "start_hours_that_work_by_shift", "min_lead_hours_for_new_sessions") if k in ctx}}
+    facts["alert"]["reasons"] = [r.get("message") for r in ctx.get("reasons", [])][:3]
+
+    sessions = run_read_only_tool(db, now, "list_upcoming_sessions", {"course_id": alert.course_id, "min_free_seats": 1, "limit": PREFETCH_SESSIONS})
+    existing = []
+    for session in sessions.get("sessions", []):
         found = run_read_only_tool(db, now, "find_eligible_drivers", {
             "course_id": alert.course_id, "session_id": session["session_id"], "limit": PREFETCH_DRIVERS_PER_SESSION})
-        by_session[str(session["session_id"])] = [{"driver_id": d["driver_id"], "name": d["name"]} for d in found.get("drivers", [])]
-    if by_session:
-        out["eligible_drivers_by_session_id"] = by_session
-    slots = run_read_only_tool(db, now, "find_trainer_slots", {"course_id": alert.course_id, "limit": PREFETCH_SLOTS})
-    if slots.get("slots"):
-        out["open_new_session_slots"] = slots["slots"]
-    return out
+        existing.append({
+            "session_id": session["session_id"], "start": session["start"], "free_seats": session["free_seats"],
+            "eligible_total": found.get("total_eligible"),
+            "eligible_drivers": [{"driver_id": d["driver_id"], "name": d["name"], "shift": d["shift"]} for d in found.get("drivers", [])],
+        })
+    facts["existing_sessions_with_free_seats"] = existing
+
+    windows = run_read_only_tool(db, now, "suggest_session_times", {"course_id": alert.course_id})
+    facts["best_new_session_windows"] = [
+        {"start": w["start"], "end": w["end"], "drivers_available": w["available_driver_count"],
+         "by_shift": w["available_by_shift"], "free_trainer_ids": w["qualified_trainers_free"][:3]}
+        for w in windows.get("windows", [])[:PREFETCH_WINDOWS]
+    ]
+    return json.dumps(facts, separators=(",", ":"), default=str)
 
 
-def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, temperature: float, strategy: str) -> SampleState:
+def run_agent_loop(
+    db: Session, now: datetime, alert: Alert, llm: LLMClient, temperature: float, strategy: str,
+    facts_text: str | None = None, already: str = "",
+) -> SampleState:
     """Let the model call tools until it submits (or runs out of steps). Raises LLMError if the LLM fails."""
     state = SampleState()
     # Look up the basics ourselves, once, so the model does not spend steps (and tokens) asking for them.
-    facts = {
-        "alert": run_read_only_tool(db, now, "get_alert_context", {"alert_id": alert.id}),
-        "sessions_with_free_seats": run_read_only_tool(
-            db, now, "list_upcoming_sessions", {"course_id": alert.course_id, "min_free_seats": 1, "limit": PREFETCH_SESSIONS}),
-    }
-    facts.update(_prefetch_candidates(db, now, alert, facts["sessions_with_free_seats"]))
-    facts_text = json.dumps(facts, separators=(",", ":"), default=str)
-    state.trace.append({"note": "alert context, upcoming sessions, eligible drivers and open slots were looked up by the server and put in the prompt"})
+    if facts_text is None:
+        facts_text = build_facts(db, now, alert)
+    state.trace.append({"note": "alert context, pool by shift, eligible drivers per session and the best new-session windows were looked up by the server and put in the prompt"})
     state.messages = [
         {"role": "system", "content": prompts.system_prompt()},
-        {"role": "user", "content": prompts.sample_prompt(alert.id, alert.course_id, strategy, facts_text)},
+        {"role": "user", "content": prompts.sample_prompt(alert.id, alert.course_id, strategy, facts_text, already)},
     ]
     for _ in range(settings.planner_max_steps):
         pruned = prune_messages(state.messages, settings.planner_context_char_budget)
         if pruned:
             state.trace.append({"note": f"{pruned} old tool result(s) dropped from the prompt to stay under the size budget"})
         try:
-            resp = llm.chat(state.messages, tools=TOOL_SPECS, temperature=temperature, max_tokens=MAX_TOKENS_PER_STEP)
+            resp = llm.chat(state.messages, tools=tool_specs(), temperature=temperature, max_tokens=MAX_TOKENS_PER_STEP)
         except LLMError as err:
             if err.kind != "bad_request" or "validation failed" not in err.message.lower():
                 raise
@@ -341,8 +391,8 @@ def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, tem
                             entry["result"] = "submitted"
                             state.trace.append(entry)
                             return state
-                    elif state.n_validate >= MAX_VALIDATE_CALLS:
-                        result = {"error": f"validate_plan can be called at most {MAX_VALIDATE_CALLS} times. Call submit_plan now."}
+                    elif state.n_validate >= settings.planner_max_validate_calls:
+                        result = {"error": f"validate_plan can be called at most {settings.planner_max_validate_calls} times. Call submit_plan now."}
                     else:
                         state.n_validate += 1
                         result = _validate_for_agent(db, now, alert, raw, state)
@@ -363,7 +413,7 @@ def run_agent_loop(db: Session, now: datetime, alert: Alert, llm: LLMClient, tem
 # --- Turning a finished loop into a stored plan -----------------------------------------------------
 def build_plan_row(
     db: Session, now: datetime, run: PlannerRun, alert: Alert, index: int, temperature: float, strategy: str,
-    state: SampleState, latency_ms: int, seen_hashes: set[str],
+    state: SampleState, latency_ms: int, seen_hashes: set[str], seen_signatures: list[set] | None = None,
 ) -> Plan:
     row = Plan(
         alert_id=alert.id, run_id=run.id, sample_index=index, temperature=temperature, strategy=strategy,
@@ -391,23 +441,28 @@ def build_plan_row(
         row.rejection_reasons = [parsed.model_dump(mode="json")]
         row.checker_caught = None  # the checker never ran, so there is no catch to measure
     else:
-        result = check_plan(db, parsed, now)  # the server's own verdict, never the agent's
-        row.is_valid = result.is_valid
-        row.outcome = "valid" if result.is_valid else "invalid"
-        row.rejection_reasons = [v.model_dump(mode="json") for v in result.violations]
-        row.checker_caught = checker_caught_all(row.fabricated_ids, result.violations)
+        violations = all_violations(db, parsed, now)  # the server's own verdict (checker + planner policy), never the agent's
+        row.is_valid = not violations
+        row.outcome = "valid" if not violations else "invalid"
+        row.rejection_reasons = [v.model_dump(mode="json") for v in violations]
+        row.checker_caught = checker_caught_all(row.fabricated_ids, violations)
 
+    signature = plan_signature(row.actions)
     if row.plan_hash and row.plan_hash in seen_hashes:
         row.is_duplicate = True
     elif row.plan_hash:
         seen_hashes.add(row.plan_hash)
+    if not row.is_duplicate and seen_signatures is not None and overlaps_earlier(signature, seen_signatures):
+        row.is_duplicate = True  # a near copy of an earlier sample: not a separate option
+    if seen_signatures is not None and signature:
+        seen_signatures.append(signature)
     if row.outcome == "valid":
         row.status = "superseded" if row.is_duplicate else "valid"  # a repeat of an earlier sample is never ranked
     return row
 
 
 def _count_row(run: PlannerRun, row: Plan) -> None:
-    """Update the run's counters. Duplicates are counted separately so they are not double-counted as distinct plans."""
+    """Update the run's counters (raw LLM samples only). Duplicates are counted separately so they are not double-counted."""
     if row.is_duplicate:
         run.n_duplicates += 1
         return
@@ -424,6 +479,7 @@ def _audit_plan(db: Session, now: datetime, row: Plan) -> None:
         "is_valid": row.is_valid, "violation_codes": [v.get("code") for v in row.rejection_reasons],
         "fabricated_ids": row.fabricated_ids, "strategy": row.strategy, "temperature": row.temperature,
         "plan_hash": row.plan_hash, "is_duplicate": row.is_duplicate, "actions": summarise_actions(row.actions),
+        "source": row.source, "parent_plan_id": row.parent_plan_id,
         "rationale": (row.rationale or "")[:RATIONALE_AUDIT_LIMIT],
     })
 
@@ -432,12 +488,65 @@ def _run_counts(run: PlannerRun) -> dict:
     return {
         "n_requested": run.n_requested, "n_valid": run.n_valid, "n_invalid": run.n_invalid,
         "n_schema_invalid": run.n_schema_invalid, "n_no_plan": run.n_no_plan, "n_step_limit": run.n_step_limit,
-        "n_duplicates": run.n_duplicates, "n_llm_errors": run.n_llm_errors,
+        "n_duplicates": run.n_duplicates, "n_llm_errors": run.n_llm_errors, "n_pruned": run.n_pruned, "n_greedy": run.n_greedy,
         "total_tokens": run.total_tokens, "duration_ms": run.duration_ms,
     }
 
 
-# --- The whole run ----------------------------------------------------------------------------------
+# --- Plans that are not raw LLM output: trimmed and rule-based --------------------------------------------------------------------
+def _synthetic_row(
+    db: Session, now: datetime, run: PlannerRun, alert: Alert, raw: dict, source: str, index: int, strategy: str,
+    seen_hashes: set[str], seen_signatures: list[set], parent: Plan | None, trace: list[dict],
+) -> Plan:
+    """A stored plan the server made itself (pruned LLM plan, or the greedy baseline), checked exactly like any other."""
+    row = Plan(
+        alert_id=alert.id, run_id=run.id, sample_index=index, strategy=strategy, status="invalid", is_valid=False,
+        actions=raw.get("actions", []), rationale=raw.get("rationale"), rejection_reasons=[], trace=trace,
+        created_at=now, fabricated_ids=[], source=source, parent_plan_id=parent.id if parent else None,
+    )
+    row.plan_hash = compute_plan_hash(row.actions)
+    parsed = parse_plan(raw)
+    if isinstance(parsed, Violation):
+        row.outcome, row.rejection_reasons = "schema_invalid", [parsed.model_dump(mode="json")]
+    else:
+        violations = all_violations(db, parsed, now)
+        row.is_valid, row.outcome = not violations, ("valid" if not violations else "invalid")
+        row.rejection_reasons = [v.model_dump(mode="json") for v in violations]
+    signature = plan_signature(row.actions)
+    if row.plan_hash and row.plan_hash in seen_hashes:
+        row.is_duplicate = True
+    elif row.plan_hash:
+        seen_hashes.add(row.plan_hash)
+    if not row.is_duplicate and overlaps_earlier(signature, seen_signatures):
+        row.is_duplicate = True
+    if signature:
+        seen_signatures.append(signature)
+    if row.outcome == "valid":
+        row.status = "superseded" if row.is_duplicate else "valid"
+    return row
+
+
+def _maybe_prune(
+    db: Session, now: datetime, run: PlannerRun, alert: Alert, parent: Plan, ctx: ScoringContext,
+    seen_hashes: set[str], seen_signatures: list[set],
+) -> Plan | None:
+    """If the LLM's plan was invalid, try removing the rejected actions. Stores the result as a separate ``llm_pruned`` plan."""
+    if parent.outcome != "invalid" or not parent.actions:
+        return None
+    raw = {"course_id": alert.course_id, "alert_id": alert.id, "rationale": parent.rationale, "actions": parent.actions}
+    pruned, info = prune_plan(db, now, raw, ctx)
+    parent.trace = list(parent.trace or []) + [{"note": "prune step: " + (
+        f"kept {info['kept']} of {info['kept'] + info['removed']} actions" if pruned else info.get("reason", "nothing kept"))}]
+    if pruned is None:
+        return None
+    pruned["rationale"] = f"Trimmed from plan {parent.id}: removed {info['removed']} action(s) the checker rejected. " + (parent.rationale or "")
+    row = _synthetic_row(db, now, run, alert, pruned, "llm_pruned", parent.sample_index or 0, parent.strategy or "",
+                         seen_hashes, seen_signatures, parent,
+                         [{"note": f"made by removing {info['removed']} rejected action(s) from plan {parent.id}"}])
+    return row if row.outcome == "valid" else None
+
+
+# --- The whole run -------------------------------------------------------------------------------------------------------------
 def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
     """Run all samples of a queued run, one after another. Commits after every sample so the UI can show progress."""
     run = db.get(PlannerRun, run_id)
@@ -454,23 +563,60 @@ def execute_run(db: Session, run_id: int, llm: LLMClient) -> PlannerRun:
     db.commit()
 
     seen_hashes: set[str] = set()
+    seen_signatures: list[set] = []
     try:
+        course = db.get(Course, alert.course_id)
+        feas = Feasibility(db, course, now)
+        verdict = assess(feas)
+        if not verdict["feasible"]:
+            # No valid plan can exist, so do not ask the LLM to invent one. Say why, with the numbers.
+            run.infeasibility = {"code": verdict["code"], "message": verdict["message"], "numbers": verdict["numbers"]}
+            run.status, run.finished_at = "done", now
+            run.duration_ms = int((time.monotonic() - started) * 1000)
+            log_event(db, now, "system", "planner_run_infeasible", "planner_run", run.id, {"alert_id": alert.id, **run.infeasibility})
+            db.commit()
+            finalize_run(db, run.id, llm)
+            return run
+
+        ctx = build_context(db, alert, now)
+        if settings.planner_greedy_baseline:
+            raw = build_greedy_plan(db, alert, ctx, feas)
+            if raw is not None:
+                greedy = _synthetic_row(db, now, run, alert, raw, "greedy_baseline", -1, "rule-based baseline",
+                                        seen_hashes, seen_signatures, None, [{"note": "built by the deterministic greedy planner, no LLM"}])
+                db.add(greedy)
+                db.flush()
+                run.n_greedy += 1
+                _audit_plan(db, now, greedy)
+                db.commit()
+        facts_text = build_facts(db, now, alert)
+        pool_by_shift = feas.pool_by_shift()
+        llm_rows: list[Plan] = []
+
         for index in range(run.n_requested):
             if index > 0 and settings.planner_sample_pause_seconds > 0:
                 time.sleep(settings.planner_sample_pause_seconds)
             temperature = prompts.pick_temperature(index)
-            strategy = prompts.pick_strategy(alert.shortfall_type, index)
+            strategy = prompts.pick_strategy(alert.shortfall_type, index, pool_by_shift)
             sample_started = time.monotonic()
-            state = run_agent_loop(db, now, alert, llm, temperature, strategy)
+            state = run_agent_loop(db, now, alert, llm, temperature, strategy, facts_text, already_proposed_text(llm_rows))
             latency_ms = int((time.monotonic() - sample_started) * 1000)
             if state.model:
                 run.model = state.model
             run.total_tokens += state.tokens
-            row = build_plan_row(db, now, run, alert, index, temperature, strategy, state, latency_ms, seen_hashes)
+            row = build_plan_row(db, now, run, alert, index, temperature, strategy, state, latency_ms, seen_hashes, seen_signatures)
             db.add(row)
             db.flush()
+            llm_rows.append(row)
             _count_row(run, row)
             _audit_plan(db, now, row)
+            if not row.is_duplicate:
+                pruned = _maybe_prune(db, now, run, alert, row, ctx, seen_hashes, seen_signatures)
+                if pruned is not None:
+                    db.add(pruned)
+                    db.flush()
+                    run.n_pruned += 1
+                    _audit_plan(db, now, pruned)
             run.duration_ms = int((time.monotonic() - started) * 1000)
             db.commit()
     except Exception as err:  # LLMError, or a bug: either way the run must not stay "running" forever
@@ -508,4 +654,3 @@ def run_planner(db: Session, alert_id: int, n: int, llm: LLMClient) -> PlannerRu
     alert = db.get(Alert, alert_id)
     run = create_run(db, alert, n, getattr(llm, "model", None) or settings.groq_model)
     return execute_run(db, run.id, llm)
-

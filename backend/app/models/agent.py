@@ -62,6 +62,9 @@ class PlannerRun(Base):
     n_step_limit: Mapped[int] = mapped_column(Integer, default=0)
     n_duplicates: Mapped[int] = mapped_column(Integer, default=0)
     n_llm_errors: Mapped[int] = mapped_column(Integer, default=0)
+    n_pruned: Mapped[int] = mapped_column(Integer, default=0)  # valid plans made by trimming an invalid LLM plan
+    n_greedy: Mapped[int] = mapped_column(Integer, default=0)  # 1 when the rule-based baseline plan was stored
+    infeasibility: Mapped[Any | None] = mapped_column(JSON, default=None, nullable=True)  # {code, message, numbers} when no valid plan can exist
     model: Mapped[str] = mapped_column(String(100), default="")
     prompt_version: Mapped[str] = mapped_column(String(20), default="")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
@@ -107,6 +110,9 @@ class Plan(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # simulated time
+    # Phase 6b: where the plan came from. Hallucination metrics use only source "llm" (the raw model output).
+    source: Mapped[str] = mapped_column(String(20), default="llm")  # llm / llm_pruned / greedy_baseline
+    parent_plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), default=None)  # the raw plan a pruned plan came from
 
 
 class AuditLog(Base):

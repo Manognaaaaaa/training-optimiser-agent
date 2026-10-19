@@ -71,8 +71,7 @@ def test_approve_creates_new_sessions_and_move_cancels_the_old_booking(adb):
     alert = adb.get(Alert, ALERT_ID)
     now = get_sim_now(adb)
     slot = run_read_only_tool(adb, now, "find_trainer_slots", {"course_id": alert.course_id, "limit": 1})["slots"][0]
-    sessions = run_read_only_tool(adb, now, "list_upcoming_sessions", {"course_id": alert.course_id, "min_free_seats": 1})["sessions"]
-    eligible = run_read_only_tool(adb, now, "find_eligible_drivers", {"course_id": alert.course_id, "session_id": sessions[0]["session_id"]})["drivers"]
+    eligible = run_read_only_tool(adb, now, "find_eligible_drivers", {"course_id": alert.course_id, "start": slot["start"]})["drivers"]
     plan = {"course_id": alert.course_id, "actions": [
         {"type": "add_session", "temp_ref": "new:1", "course_id": alert.course_id, "trainer_id": slot["trainer_id"],
          "start": slot["start"], "end": slot["end"], "location": "Room 9", "capacity": 5},

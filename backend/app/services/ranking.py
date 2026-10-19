@@ -75,6 +75,12 @@ def build_context(db: Session, alert: Alert, now: datetime | None = None) -> Sco
     return ScoringContext(facts.now, facts, fc, variance, pool, {d.id: d for d in facts.drivers})
 
 
+def show_probability(ctx: ScoringContext, course_id: int, driver_id: int) -> float:
+    """One driver's chance of showing up: their record on this course, shrunk toward the course rate (the course rate if none)."""
+    att, no_show = ctx.facts.driver_course.get((course_id, driver_id), (0, 0))
+    return shrunk_rate(att, att + no_show, ctx.fc.p_show) if att + no_show else ctx.fc.p_show
+
+
 def _share(counts: dict[str, int]) -> dict[str, float]:
     total = sum(counts.values())
     return {g: round(n / total, 4) for g, n in sorted(counts.items())} if total else {}
@@ -104,9 +110,7 @@ def score_plan(ctx: ScoringContext, course_id: int, actions: list[dict]) -> dict
         return new_course.get(ref) == course_id if isinstance(ref, str) else existing_course.get(ref) == course_id
 
     def q_of(driver_id: int) -> float:
-        """The driver's own show-up chance: their record on this course, shrunk toward the course rate."""
-        att, no_show = facts.driver_course.get((course_id, driver_id), (0, 0))
-        return shrunk_rate(att, att + no_show, fc.p_show) if att + no_show else fc.p_show
+        return show_probability(ctx, course_id, driver_id)
 
     d_mu = d_var = 0.0
     touched: dict[int, DriverFact] = {}
