@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { getAutoplay, setAutoplay } from '../api/calendarSync'
+import { getAutoplay, setAutoplay } from '../api/sim'
 import { PAUSE_REASONS } from '../lib/liveMap'
 import { Button, Panel, SelectField, Tag } from './ui'
 

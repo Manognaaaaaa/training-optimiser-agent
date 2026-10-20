@@ -1,4 +1,3 @@
-import logging
 from collections.abc import Callable
 
 from typing import Literal
@@ -103,18 +102,6 @@ def _auto_plan(db: Session, background: BackgroundTasks, session_factory: Callab
         queue_run(db, alert, None, llm, background, session_factory)
 
 
-def _reset_calendar_events(db: Session) -> None:
-    """The re-seed gives sessions new ids, so events already in the calendar would be orphaned: delete ours first."""
-    from app.calendar.factory import get_backend
-    from app.calendar.ops import reset_calendar
-
-    try:
-        reset_calendar(db, get_backend(), "DELETE")
-    except Exception as err:  # Google down or tables missing: the reset itself must still work
-        logging.getLogger(__name__).warning("Could not clear the calendar before re-seeding: %s", err)
-        db.rollback()
-
-
 @router.post("/reset", response_model=SimStateOut)
 def reset(body: ResetRequest | None = None, db: Session = Depends(get_db)):
     """Wipe all data and regenerate it. Uses the given seed, else the current one, else 42."""
@@ -125,7 +112,6 @@ def reset(body: ResetRequest | None = None, db: Session = Depends(get_db)):
             seed = sim_engine.get_seed(db)
         except RuntimeError:
             seed = 42
-    _reset_calendar_events(db)
     engine = db.get_bind()
     db.close()  # release the connection before dropping tables
     reseed(engine, seed)

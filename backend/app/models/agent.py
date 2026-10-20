@@ -173,47 +173,13 @@ class AlertDecision(Base):
 
 
 class CalendarOutbox(Base):
-    """One session that needs syncing to Google Calendar. Written by plan approval (and manual / backfill requests).
-
-    The worker syncs the session's *current DB state*, so older pending rows for the same session are coalesced
-    (marked ``skipped``). ``created_at`` is simulated time like the rest of the schema; every other timestamp
-    here (claimed, next attempt, completed) is real UTC because the worker runs in real time.
-    """
+    """Changes an approved plan made, waiting for the Phase 7 Google Calendar sync."""
 
     __tablename__ = "calendar_outbox"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id"), default=None)
-    alert_id: Mapped[int | None] = mapped_column(ForeignKey("alerts.id"), default=None)
-    session_id: Mapped[int | None] = mapped_column(ForeignKey("training_sessions.id"), default=None, index=True)
-    change_type: Mapped[str] = mapped_column(String(20))  # create_session / enroll_driver / move_driver / manual / backfill
-    op: Mapped[str] = mapped_column(String(10), default="upsert")  # upsert / cancel
-    source: Mapped[str] = mapped_column(String(20), default="plan_approval")  # plan_approval / manual / backfill
+    plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"))
+    change_type: Mapped[str] = mapped_column(String(20))  # create_session / enroll_driver / move_driver
     payload: Mapped[Any] = mapped_column(JSON, default=dict)
-    # pending -> in_progress -> done / failed / skipped (skipped = coalesced into a newer row)
-    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
-    attempts: Mapped[int] = mapped_column(Integer, default=0)
-    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # real UTC
-    last_error: Mapped[str | None] = mapped_column(Text, default=None)
-    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # real UTC
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # real UTC
+    status: Mapped[str] = mapped_column(String(20), default="pending")
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # simulated time
-    created_real_at: Mapped[datetime | None] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # real UTC, for approve-to-synced timing
-
-
-class CalendarLink(Base):
-    """One row per session that has an event in Google Calendar."""
-
-    __tablename__ = "calendar_links"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("training_sessions.id"), unique=True)
-    google_event_id: Mapped[str] = mapped_column(String(100))
-    calendar_id: Mapped[str] = mapped_column(String(200), default="")
-    etag: Mapped[str | None] = mapped_column(String(200), default=None)
-    html_link: Mapped[str | None] = mapped_column(Text, default=None)
-    synced_hash: Mapped[str | None] = mapped_column(String(64), default=None)  # hash of the event body last pushed
-    sync_status: Mapped[str] = mapped_column(String(20), default="pending")  # synced / pending / failed / cancelled / drift
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)  # real UTC
-    last_error: Mapped[str | None] = mapped_column(Text, default=None)

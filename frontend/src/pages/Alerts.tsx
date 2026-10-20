@@ -10,7 +10,6 @@ import { ApiError } from '../api/client'
 import { getSimState } from '../api/sim'
 import type { RiskLevel } from '../api/tracking'
 import PlanCard, { ViolationList } from '../components/alerts/PlanCard'
-import { SyncLine } from '../components/SyncBadge'
 import { useToast } from '../components/Toast'
 import { Button, ConfirmDialog, EmptyState, ErrorState, PageHeader, Panel, RiskPill, SelectField, Skeleton, Tag, TextAreaField } from '../components/ui'
 import { useAllTrainers } from '../hooks/useLookups'
@@ -255,19 +254,6 @@ function Detail({ alertId, simNow, actorId }: { alertId: number; simNow?: string
             ))}
           </ul>
         </details>
-      )}
-
-      {d.calendar && (
-        <Panel title="Google Calendar">
-          <ul className="divide-y divide-line text-sm">
-            {d.calendar.sessions.map((x) => (
-              <li key={x.session_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <span className="font-medium">Session {x.session_id} · {fmtDate(x.start)}</span>
-                <SyncLine info={x.calendar} />
-              </li>
-            ))}
-          </ul>
-        </Panel>
       )}
 
       {d.decisions.length > 0 && (

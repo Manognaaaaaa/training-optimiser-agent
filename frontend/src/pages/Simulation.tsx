@@ -6,7 +6,6 @@ import { listAlerts, type Alert } from '../api/alerts'
 import { getSimProgress, resetSim, type AdvanceSummary } from '../api/sim'
 import type { RiskLevel } from '../api/tracking'
 import { AutoplayPanel } from '../components/AutoplayPanel'
-import { CalendarSyncPanel } from '../components/CalendarSyncPanel'
 import { useAdvance } from '../components/shell/useAdvance'
 import { Button, ConfirmDialog, DataTable, ErrorState, Hint, PageHeader, Panel, ProgressBar, RiskPill, Skeleton, StatCard, type Column } from '../components/ui'
 import { fmtDate, fmtNumber } from '../lib/format'
@@ -204,8 +203,6 @@ export default function Simulation() {
           <DataTable caption="Progress by course" columns={columns} rows={progress.data} rowKey={(c) => c.course_id} initialSort={{ key: 'progress', dir: 'asc' }} />
         )}
       </section>
-
-      {s && <CalendarSyncPanel simNow={s.current_time} />}
 
       <ConfirmDialog
         open={confirmReset}

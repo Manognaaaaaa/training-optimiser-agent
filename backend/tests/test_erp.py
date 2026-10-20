@@ -410,4 +410,4 @@ def test_calendar_query_count_does_not_grow_with_sessions(client, engine):
     statements: list[str] = []
     event.listen(engine, "before_cursor_execute", lambda conn, cur, stmt, *a: statements.append(stmt))
     client.get("/api/calendar?start=2026-02-01T00:00:00&end=2026-03-01T00:00:00")
-    assert len(statements) <= 5  # sim clock + sessions + calendar links + queued sync rows (constant, not per session)
+    assert len(statements) <= 3  # sim clock + sessions

@@ -66,6 +66,17 @@ export interface CourseProgress {
 
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
 
+export interface AutoplayState {
+  enabled: boolean
+  step: 'day' | 'week'
+  interval_seconds: number
+  paused_reason: string | null
+  steps_done: number
+}
+
+export const getAutoplay = () => apiFetch<AutoplayState>('/sim/autoplay')
+export const setAutoplay = (body: { enabled: boolean; step?: 'day' | 'week'; interval_seconds?: number }) =>
+  apiFetch<AutoplayState>('/sim/autoplay', post(body))
 export const getSimState = () => apiFetch<SimState>('/sim/state')
 export const getSimProgress = () => apiFetch<CourseProgress[]>('/sim/progress')
 export const advanceSim = (days: number) => apiFetch<AdvanceSummary>('/sim/advance', post({ days }))

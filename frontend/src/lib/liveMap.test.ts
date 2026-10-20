@@ -18,9 +18,6 @@ describe('keysFor', () => {
     expect(keysFor('planner_run.progress', {})).toEqual([])
     expect(keysFor('heartbeat', {})).toEqual([])
   })
-  it('refreshes the calendar sync panel on sync updates', () => {
-    expect(keysFor('calendar.sync_updated', { session_id: 1 })).toContainEqual(['calendar-sync'])
-  })
 })
 
 describe('toastFor', () => {
@@ -28,11 +25,9 @@ describe('toastFor', () => {
     expect(toastFor('alert.created', { risk_level: 'high', course_name: 'Defensive Driving' })?.text).toContain('Defensive Driving')
     expect(toastFor('alert.created', { risk_level: 'medium' })).toBeNull()
   })
-  it('toasts plans ready, approvals and failed syncs', () => {
+  it('toasts plans ready and approvals', () => {
     expect(toastFor('alert.updated', { status: 'plans_ready', course_name: 'X' })).not.toBeNull()
     expect(toastFor('plan.decided', { decision: 'approve', plan_id: 3 })?.level).toBe('success')
     expect(toastFor('plan.decided', { decision: 'reject_plan' })).toBeNull()
-    expect(toastFor('calendar.sync_updated', { status: 'failed', session_id: 4 })?.level).toBe('error')
-    expect(toastFor('calendar.sync_updated', { status: 'synced' })).toBeNull()
   })
 })

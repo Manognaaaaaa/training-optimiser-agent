@@ -9,7 +9,6 @@ import { ProgressBar } from './ui'
 import { useRefresh } from '../hooks/useRefresh'
 import { fmtDateTime, fmtTime } from '../utils/datetime'
 import { FillBadge, ShiftBadge, StatusBadge } from './Badge'
-import { SyncLine } from './SyncBadge'
 import ConfirmDialog from './ConfirmDialog'
 import Drawer, { Section } from './Drawer'
 import { inputClass } from './FormModal'
@@ -78,7 +77,6 @@ export default function SessionDrawer({ sessionId, onClose }: { sessionId: numbe
               <dt className="text-slate-500">Trainer</dt><dd>{s.trainer_name}</dd>
               <dt className="text-slate-500">Location</dt><dd>{s.location}</dd>
               <dt className="text-slate-500">Status</dt><dd className="flex items-center gap-2"><StatusBadge status={s.status} /> <span className="text-slate-500">source: {s.source}</span></dd>
-              <dt className="text-slate-500">Google Calendar</dt><dd><SyncLine info={s.calendar} /></dd>
               <dt className="text-slate-500">Fill</dt>
               <dd className="flex items-center gap-2">
                 <div className="w-full space-y-1">

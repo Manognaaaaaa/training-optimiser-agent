@@ -31,14 +31,6 @@ class SessionUpdate(BaseModel):
     _check_tz = field_validator("start_time", "end_time")(_naive)
 
 
-class CalendarInfo(BaseModel):
-    """Google Calendar sync state of one session."""
-
-    status: str = "none"  # none / pending / synced / failed / drift / cancelled
-    html_link: str | None = None
-    last_synced_at: datetime | None = None
-
-
 class SessionOut(BaseModel):
     id: int
     course_id: int
@@ -58,7 +50,6 @@ class SessionOut(BaseModel):
     fill_rate: float | None
     fill_band: str
     is_editable: bool  # scheduled and not started yet
-    calendar: CalendarInfo | None = None
 
 
 class EnrollmentCreate(BaseModel):
@@ -102,7 +93,6 @@ class CalendarEvent(BaseModel):
     attended: int
     fill_rate: float | None
     fill_band: str
-    calendar: CalendarInfo | None = None
 
 
 class CalendarResponse(BaseModel):

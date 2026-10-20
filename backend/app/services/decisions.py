@@ -108,11 +108,9 @@ def _book(db: Session, session_id: int, driver_id: int) -> None:
         existing.status = "booked"
 
 
-def _outbox_row(plan: Plan, now: datetime, change_type: str, session_id: int, payload: dict) -> CalendarOutbox:
-    """One outbox row: "this session changed because of this plan, sync it"."""
-    return CalendarOutbox(
-        plan_id=plan.id, alert_id=plan.alert_id, session_id=session_id, change_type=change_type, op="upsert",
-        source="plan_approval", payload=payload, created_at=now)
+def _outbox_row(plan: Plan, now: datetime, change_type: str, payload: dict) -> CalendarOutbox:
+    """One outbox row: a record of a change the plan made."""
+    return CalendarOutbox(plan_id=plan.id, change_type=change_type, payload=payload, created_at=now)
 
 
 def _apply(db: Session, now: datetime, plan: Plan, parsed) -> list[CalendarOutbox]:
@@ -134,12 +132,11 @@ def _apply(db: Session, now: datetime, plan: Plan, parsed) -> list[CalendarOutbo
             created[a.temp_ref] = row.id
             payload = {"session_id": row.id, "temp_ref": a.temp_ref, "course_id": a.course_id, "trainer_id": a.trainer_id,
                        "start": a.start.isoformat(), "end": a.end.isoformat(), "location": a.location, "capacity": a.capacity}
-            outbox.append(_outbox_row(plan, now, "create_session", row.id, payload))
+            outbox.append(_outbox_row(plan, now, "create_session", payload))
         elif isinstance(a, EnrollDriver):
             session_id = ref_to_id(a.session_id)
             _book(db, session_id, a.driver_id)
-            outbox.append(_outbox_row(plan, now, "enroll_driver", session_id,
-                                      {"driver_id": a.driver_id, "session_id": session_id}))
+            outbox.append(_outbox_row(plan, now, "enroll_driver", {"driver_id": a.driver_id, "session_id": session_id}))
         elif isinstance(a, MoveDriver):
             source = db.scalar(select(Enrollment).where(
                 Enrollment.session_id == a.from_session_id, Enrollment.driver_id == a.driver_id, Enrollment.status == "booked"))
@@ -149,9 +146,7 @@ def _apply(db: Session, now: datetime, plan: Plan, parsed) -> list[CalendarOutbo
             to_id = ref_to_id(a.to_session_id)
             _book(db, to_id, a.driver_id)
             move = {"driver_id": a.driver_id, "from_session_id": a.from_session_id, "to_session_id": to_id}
-            # A move changes the roster of two sessions, so each one gets its own row.
-            outbox.append(_outbox_row(plan, now, "move_driver", to_id, move))
-            outbox.append(_outbox_row(plan, now, "move_driver", a.from_session_id, move))
+            outbox.append(_outbox_row(plan, now, "move_driver", move))
         db.flush()
     db.add_all(outbox)
     db.flush()
@@ -213,14 +208,13 @@ def approve_plan(db: Session, plan_id: int, actor_trainer_id: int | None) -> dic
         _record(db, now, alert, plan, "approve", actor, None, None)
         log_event(db, now, "system", "plan_applied", "plan", plan.id, {
             "alert_id": alert.id, "changes": [{"change_type": o.change_type, **o.payload} for o in outbox]})
-        publish_after_commit(db, "sessions.changed", {"session_ids": sorted({o.session_id for o in outbox if o.session_id})})
+        publish_after_commit(db, "sessions.changed", {"session_ids": sorted({
+            sid for o in outbox for sid in (o.payload.get("session_id"), o.payload.get("from_session_id"), o.payload.get("to_session_id"))
+            if isinstance(sid, int)})})
         db.commit()
     except Exception:
         db.rollback()  # the whole plan or nothing
         raise
-    from app.calendar.sync import sync_service
-
-    sync_service.kick()  # wake the calendar worker so Google sees the change within seconds
     return {**approval_result(db, plan), "already_approved": False}
 
 

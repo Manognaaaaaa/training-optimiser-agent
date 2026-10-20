@@ -5,7 +5,7 @@ export type LiveData = Record<string, unknown>
 export const LIVE_EVENT_TYPES = [
   'sim.advanced', 'sim.autoplay_changed', 'sim.autoplay_paused', 'attendance.recorded', 'forecast.updated',
   'alert.created', 'alert.updated', 'planner_run.progress', 'planner_run.completed', 'plan.decided',
-  'sessions.changed', 'master_data.changed', 'calendar.sync_updated', 'heartbeat', 'resync',
+  'sessions.changed', 'master_data.changed', 'heartbeat', 'resync',
 ] as const
 
 const TRACKING: QueryKey[] = [['tracking'], ['sim'], ['calendar'], ['sessions'], ['session'], ['enrollments']]
@@ -40,11 +40,9 @@ export function keysFor(type: string, data: LiveData): QueryKey[] | 'all' {
     case 'plan.decided':
       return [['alert'], ['alerts'], ['planner', 'runs']]
     case 'sessions.changed':
-      return [['calendar'], ['sessions'], ['session'], ['enrollments'], ['tracking'], ['sim'], ['calendar-sync']]
+      return [['calendar'], ['sessions'], ['session'], ['enrollments'], ['tracking'], ['sim']]
     case 'master_data.changed':
       return MASTER[String(data.entity)] ?? [['drivers'], ['trainers'], ['courses']]
-    case 'calendar.sync_updated':
-      return [['calendar'], ['calendar-sync'], ['alert'], ['sessions'], ['session']]
     default:
       return []
   }
@@ -61,9 +59,6 @@ export function toastFor(type: string, data: LiveData): { level: 'success' | 'wa
   }
   if (type === 'plan.decided' && data.decision === 'approve') {
     return { level: 'success', text: `Plan ${data.plan_id} approved`, id: `plan-approved-${data.plan_id}` }
-  }
-  if (type === 'calendar.sync_updated' && data.status === 'failed') {
-    return { level: 'error', text: `Calendar sync failed for session ${data.session_id}`, id: `sync-failed-${data.session_id}` }
   }
   if (type === 'sim.autoplay_paused') {
     return { level: 'info', text: `Auto-play paused: ${PAUSE_REASONS[String(data.reason)] ?? String(data.reason)}`, id: 'autoplay-paused' }

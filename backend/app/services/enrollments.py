@@ -146,7 +146,6 @@ def add_enrollment(db: Session, session_id: int, driver_id: int) -> dict:
     log_event(db, now, "user", "enrollment_created", "enrollment", enrollment.id, {
         "session_id": session.id, "driver_id": driver.id, "employee_code": driver.employee_code,
     })
-    _queue_sync(db, session.id)
     publish_after_commit(db, "sessions.changed", {"session_ids": [session.id]})
     db.commit()
     return _out(enrollment, driver)
@@ -164,7 +163,6 @@ def cancel_enrollment(db: Session, session_id: int, enrollment_id: int) -> dict:
     log_event(db, now, "user", "enrollment_cancelled", "enrollment", enrollment.id, {
         "session_id": session_id, "driver_id": driver.id, "employee_code": driver.employee_code,
     })
-    _queue_sync(db, session_id)
     publish_after_commit(db, "sessions.changed", {"session_ids": [session_id]})
     db.commit()
     return _out(enrollment, driver)
@@ -192,9 +190,3 @@ def eligible_drivers(db: Session, session_id: int, q: str | None = None) -> list
                 break
     return result
 
-
-def _queue_sync(db: Session, session_id: int) -> None:
-    """If this session is already in Google Calendar, queue a re-sync (its roster changed)."""
-    from app.calendar.sync import enqueue_if_linked
-
-    enqueue_if_linked(db, session_id)

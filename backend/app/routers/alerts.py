@@ -106,14 +106,6 @@ def _message_dict(m: AlertMessage | None) -> dict | None:
     }
 
 
-def _approved_calendar(db: Session, alert_id: int) -> dict | None:
-    """For an approved plan: the sessions it touched and their Google Calendar sync status."""
-    from app.calendar.ops import plan_sessions
-
-    plan_id = db.scalar(select(Plan.id).where(Plan.alert_id == alert_id, Plan.status == "approved").limit(1))
-    return None if plan_id is None else {"plan_id": plan_id, "sessions": plan_sessions(db, plan_id)}
-
-
 @router.get("/{alert_id}")
 def get_alert(alert_id: int, db: Session = Depends(get_db)):
     """The alert, its forecast numbers, the latest message, ranked plans, rejected-by-checker plans and decision history."""
@@ -152,7 +144,6 @@ def get_alert(alert_id: int, db: Session = Depends(get_db)):
         "invalid": [_plan_dict(db, p, texts, with_changes=False) for p in invalid],
         "run": run_to_dict(db, run) if run else None,
         "decisions": history,
-        "calendar": _approved_calendar(db, alert.id),
     }
 
 

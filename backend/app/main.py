@@ -9,14 +9,12 @@ from fastapi.responses import JSONResponse
 from app import models  # noqa: F401  (registers all tables on Base.metadata)
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.calendar.factory import get_backend
-from app.calendar.sync import sync_service
 from app.live.autoplay import autoplay
 from app.live.bus import bus
 from app.llm.base import LLMError
 from app.llm.planner import mark_stale_runs_failed
 from app.routers import (
-    alerts, calendar, calendar_sync, constraints, courses, drivers, health, live, planner, plans, sessions, sim, tracking, trainers,
+    alerts, calendar, constraints, courses, drivers, health, live, planner, plans, sessions, sim, tracking, trainers,
 )
 from app.services.errors import ApiError
 
@@ -28,12 +26,8 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         mark_stale_runs_failed(db)
     bus.attach_loop(asyncio.get_running_loop())  # lets worker threads publish live events
-    get_backend()  # logs a warning and falls back to the fake calendar if the Google settings are incomplete
-    if settings.calendar_sync_enabled:
-        sync_service.start(SessionLocal)
     yield
     await autoplay.stop()
-    await sync_service.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -78,7 +72,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 app.include_router(health.router, prefix="/api")
 app.include_router(sim.router, prefix="/api")
 for _router in (
-    drivers.router, trainers.router, courses.router, sessions.router, calendar.router, calendar_sync.router, tracking.router, alerts.router,
+    drivers.router, trainers.router, courses.router, sessions.router, calendar.router, tracking.router, alerts.router,
     constraints.router, planner.router, plans.router,
 ):
     app.include_router(_router, prefix="/api")
